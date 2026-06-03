@@ -19,13 +19,6 @@
 				<f:expandedContent>
 					<Label text="{i18n>appSubtitle}" />
 				</f:expandedContent>
-				<f:content>
-					<SearchField
-						id="objectSearch"
-						placeholder="{i18n>objectSearchPlaceholder}"
-						search="onObjectSearch"
-						width="22rem" />
-				</f:content>
 				<f:actions>
 					<SegmentedButton selectedKey="{ui>/viewMode}">
 						<items>
@@ -43,7 +36,7 @@
 				<fb:FilterBar
 					id="filterbar"
 					useToolbar="false"
-					showFilterConfiguration="true"
+					showFilterConfiguration="false"
 					showRestoreButton="false"
 					showClearButton="true"
 					showGoOnFB="true"
@@ -77,6 +70,17 @@
 									items="{ path: 'ui>/classes', templateShareable: false }">
 									<core:ListItem key="{ui>ClassInternalID}" text="{ui>__display}" additionalText="{ui>ClassGroup}" />
 								</ComboBox>
+							</fb:control>
+						</fb:FilterGroupItem>
+						<fb:FilterGroupItem name="object" label="{i18n>filterObjectSearch}" groupName="main" visibleInFilterBar="true">
+							<fb:control>
+								<MultiInput
+									id="objectSearch"
+									width="100%"
+									placeholder="{i18n>objectSearchPlaceholder}"
+									showValueHelp="true"
+									valueHelpRequest="onObjectValueHelp"
+									tokenUpdate="onObjectTokenUpdate" />
 							</fb:control>
 						</fb:FilterGroupItem>
 					</fb:filterGroupItems>
@@ -113,14 +117,6 @@
 					title="{ui>/noDataTitle}"
 					description="{i18n>noDataDesc}" />
 
-				<!-- Whole-class filter info bar -->
-				<Toolbar id="filterInfoBar" design="Info" visible="{ui>/filterActive}" class="sapUiSmallMarginBottom">
-					<core:Icon src="sap-icon://filter" class="sapUiTinyMarginEnd" />
-					<Text text="{ui>/filterInfo}" />
-					<ToolbarSpacer />
-					<Button type="Transparent" icon="sap-icon://clear-filter" text="{i18n>clearFilters}" press="onClearFilters" />
-				</Toolbar>
-
 				<!-- Shared toolbar for both views -->
 				<OverflowToolbar visible="{ui>/showTable}">
 					<Title id="tableTitle" text="{ui>/tableTitle}" level="H3" />
@@ -135,7 +131,8 @@
 					<ToolbarSpacer />
 					<Switch id="showEmptySwitch" state="{ui>/showEmpty}" visible="{= ${ui>/viewMode} === 'list' }" />
 					<Label text="{i18n>showEmpty}" visible="{= ${ui>/viewMode} === 'list' }" />
-					<SearchField id="resultSearch" width="18rem" placeholder="{i18n>resultSearchPlaceholder}" search="onResultSearch" liveChange="onResultSearch" visible="{= ${ui>/viewMode} === 'table' }" />
+					<SearchField id="resultSearch" width="16rem" placeholder="{i18n>resultSearchPlaceholder}" search="onResultSearch" liveChange="onResultSearch" visible="{= ${ui>/viewMode} === 'table' }" />
+					<Button id="sortBtn" icon="sap-icon://sort" text="{i18n>sortButton}" tooltip="{i18n>sortButton}" press="onSortPress" />
 					<Button id="exportBtn" icon="sap-icon://excel-attachment" text="{i18n>exportButton}" tooltip="{i18n>exportButton}" press="onExport" />
 				</OverflowToolbar>
 
@@ -155,8 +152,7 @@
 					minAutoRowCount="5"
 					busy="{ui>/tableBusy}"
 					busyIndicatorDelay="0"
-					sort="onColumnSort"
-					filter="onColumnFilter">
+					sort="onColumnSort">
 					<table:layoutData>
 						<FlexItemData growFactor="1" />
 					</table:layoutData>
@@ -176,7 +172,13 @@
 					<layoutData>
 						<FlexItemData growFactor="1" />
 					</layoutData>
-					<VBox items="{ path: 'ui>/listRows', templateShareable: false }">
+					<OverflowToolbar class="sapUiTinyMarginBottom">
+							<Label text="{i18n>sortBy}" />
+							<HBox items="{ path: 'ui>/sortFields', templateShareable: false }">
+								<Button text="{ui>label}" press="onSortFieldPress" type="{= ${ui>key} === ${ui>/sortField} ? 'Emphasized' : 'Transparent' }" icon="{= ${ui>key} === ${ui>/sortField} ? (${ui>/sortDesc} ? 'sap-icon://sort-descending' : 'sap-icon://sort-ascending') : 'sap-icon://sort' }" class="sapUiTinyMarginEnd" />
+							</HBox>
+						</OverflowToolbar>
+						<VBox items="{ path: 'ui>/listRows', templateShareable: false }">
 						<Panel class="cfaCard sapUiSmallMarginTop sapUiSmallMarginBegin sapUiSmallMarginEnd" backgroundDesign="Solid">
 							<HBox wrap="Wrap" alignItems="Start">
 								<!-- left: object master -->

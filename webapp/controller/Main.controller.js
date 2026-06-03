@@ -15,10 +15,13 @@ sap.ui.define([
 	"sap/m/List",
 	"sap/m/StandardListItem",
 	"sap/m/Button",
+	"sap/m/ViewSettingsDialog",
+	"sap/m/ViewSettingsItem",
+	"sap/ui/comp/valuehelpdialog/ValueHelpDialog",
 	"sap/ui/core/format/DateFormat",
 	"sap/ui/export/Spreadsheet",
 	"sap/ui/export/library"
-], function (Controller, JSONModel, Sorter, Filter, FilterOperator, TableColumn, tableLibrary, FilterGroupItem, Input, Text, Label, MessageToast, Dialog, List, StandardListItem, Button, DateFormat, Spreadsheet, exportLibrary) {
+], function (Controller, JSONModel, Sorter, Filter, FilterOperator, TableColumn, tableLibrary, FilterGroupItem, Input, Text, Label, MessageToast, Dialog, List, StandardListItem, Button, ViewSettingsDialog, ViewSettingsItem, ValueHelpDialog, DateFormat, Spreadsheet, exportLibrary) {
 	"use strict";
 
 	var SortOrder = tableLibrary.SortOrder;
@@ -69,6 +72,11 @@ sap.ui.define([
 				viewMode: "table",
 				showEmpty: false,
 				listRows: [],
+
+				// sorting (mirrored from the page context for the list-view buttons)
+				sortFields: [],
+				sortField: "",
+				sortDesc: false,
 
 				// whole-class filter state
 				filterActive: false,
@@ -224,7 +232,14 @@ sap.ui.define([
 			}
 
 			var oTable = this.byId("resultTable");
-			oTable.getBinding("rows").sort(new Sorter(sProperty, bDescending));
+			if (this._pageCtx) {
+					this._pageCtx.sortField = sProperty;
+					this._pageCtx.sortDesc = bDescending;
+					this._sortKeys();
+					this._reflectSortOnColumns();
+					this._loadPage(0);
+				}
+				return;
 
 			// Reflect the sort indicator on the active column only.
 			oTable.getColumns().forEach(function (c) {
@@ -271,7 +286,71 @@ sap.ui.define([
 		 * Standalone object search: look up an object number, determine its class
 		 * (prompt if it's in several), and show just that object.
 		 */
-		onObjectSearch: function (oEvent) {
+		onObjectValueHelp: function (oEvent) {
+			var oMultiInput = oEvent.getSource();
+			if (!this._oObjectVHD) {
+				this._oObjectVHD = new ValueHelpDialog({
+					title: this._bundle().getText("objectVHDTitle"),
+					supportRanges: true,
+					supportRangesOnly: true,
+					key: "objNumber",
+					ok: this._onObjectVHDOk.bind(this),
+					cancel: function () { this._oObjectVHD.close(); }.bind(this)
+				});
+				this.getView().addDependent(this._oObjectVHD);
+				this._oObjectVHD.setRangeKeyFields([{
+					key: "objNumber",
+					label: this._bundle().getText("filterObjectSearch"),
+					type: "string"
+				}]);
+			}
+			this._oObjectVHD.setTokens(oMultiInput.getTokens());
+			this._oObjectVHD.open();
+		},
+
+		_onObjectVHDOk: function (oEvent) {
+			var aTokens = oEvent.getParameter("tokens");
+			this.byId("objectSearch").setTokens(aTokens);
+			this._oObjectVHD.close();
+			this._runObjectSearch();
+		},
+
+		/** MultiInput tokens changed (typed or removed) -> run the object search. */
+		onObjectTokenUpdate: function () {
+			var that = this;
+			// defer so getTokens() reflects the committed tokens
+			setTimeout(function () { that._runObjectSearch(); }, 0);
+		},
+
+		/** Resolve & display the objects represented by the MultiInput tokens. */
+		_runObjectSearch: function () {
+			var oMultiInput = this.byId("objectSearch");
+			if (!oMultiInput) {
+				return;
+			}
+			var aNums = [];
+			oMultiInput.getTokens().forEach(function (oToken) {
+				var oRange = oToken.data("range");
+				var sVal = oRange ? oRange.value1 : oToken.getKey();
+				if (sVal === undefined || sVal === null || sVal === "") {
+					sVal = oToken.getText();
+				}
+				sVal = String(sVal == null ? "" : sVal).trim();
+				if (sVal) {
+					aNums.push(sVal);
+				}
+			});
+			if (!aNums.length) {
+				return;
+			}
+			if (aNums.length > 1) {
+				this._searchObjects(aNums);
+			} else {
+				this._searchObject(aNums[0]);
+			}
+		},
+
+		_onObjectSearchLegacy: function (oEvent) {
 			var sVal = oEvent.getParameter("query");
 			if (sVal === undefined || sVal === null) {
 				sVal = oEvent.getParameter("newValue") || "";
@@ -366,29 +445,30 @@ sap.ui.define([
 				var mMeta = await this._fetchCharcMetadata(aChars);
 				this._buildColumns(aChars, oCfg);
 
+				var aKeys = [sNum];
+				var mHeaders = await this._fetchHeaders(oCfg, aKeys);
+				var mClassByKey = {};
+				mClassByKey[sNum] = { ClassInternalID: oClass.ClassInternalID, Class: oClass.Class };
+				var oContext = { className: oClass.Class, classId: oClass.ClassInternalID, classByKey: mClassByKey };
+
 				this._pageCtx = {
 					oCfg: oCfg,
 					sClassId: oClass.ClassInternalID,
 					sClassType: oClass.ClassType,
 					className: oClass.Class,
 					aChars: aChars,
-					mMeta: mMeta
+					mMeta: mMeta,
+					keys: aKeys,
+					headers: mHeaders,
+					classByKey: mClassByKey,
+					sortVals: this._buildSortVals(oCfg, aKeys, mHeaders, oContext),
+					sortField: oCfg.fixedColumns[0].key,
+					sortDesc: false
 				};
 
-				var aValues = await this._fetchValuesForKeys(oCfg, [sNum], oClass.ClassInternalID);
-				var mHeaders = await this._fetchHeaders(oCfg, [sNum]);
-				var oContext = { className: oClass.Class, classId: oClass.ClassInternalID };
-				var aRows = this._pivotData(aValues, aChars, mMeta, oCfg, oContext, mHeaders, [sNum]);
-
-				oUI.setProperty("/rows", aRows);
-				oUI.setProperty("/listRows", this._buildListRows(aRows, aChars, mMeta));
-				oUI.setProperty("/showTable", true);
-				oUI.setProperty("/showNoData", false);
-				this._updatePagination(0, oUI.getProperty("/pageSize") || 25, aRows.length);
-				this._applyResultFilters();
+				await this._loadPage(0);
 			} catch (oError) {
 				this._showError(this._bundle().getText("dataLoadError", [this._extractError(oError)]));
-			} finally {
 				oUI.setProperty("/tableBusy", false);
 			}
 		},
@@ -457,20 +537,29 @@ sap.ui.define([
 				this._buildColumns(oUnion.chars, oCfg);
 
 				var aResolved = Object.keys(mClassByKey);
+				var mHeaders = await this._fetchHeaders(oCfg, aResolved);
+				var oContext = {
+					className: aClassIds.length === 1 ? mClassByKey[aResolved[0]].Class : this._bundle().getText("multipleClasses"),
+					classId: null,
+					classByKey: mClassByKey
+				};
+
 				this._pageCtx = {
 					oCfg: oCfg,
 					sClassId: null,
 					sClassType: sType,
-					className: aClassIds.length === 1 ? mClassByKey[aResolved[0]].Class : this._bundle().getText("multipleClasses"),
+					className: oContext.className,
 					aChars: oUnion.chars,
 					mMeta: oUnion.meta,
-					classByKey: mClassByKey
+					classByKey: mClassByKey,
+					keys: aResolved,
+					headers: mHeaders,
+					sortVals: this._buildSortVals(oCfg, aResolved, mHeaders, oContext),
+					sortField: oCfg.fixedColumns[0].key,
+					sortDesc: false
 				};
-				this._filteredKeys = aResolved;
-				oUI.setProperty("/filterActive", false);
-				oUI.setProperty("/filterInfo", "");
-				oUI.setProperty("/tableBusy", false);
 
+				this._sortKeys();
 				await this._loadPage(0);
 			} catch (oError) {
 				this._showError(this._bundle().getText("dataLoadError", [this._extractError(oError)]));
@@ -623,7 +712,7 @@ sap.ui.define([
 			this._objectSearch = "";
 			var oObjSearch = this.byId("objectSearch");
 			if (oObjSearch) {
-				oObjSearch.setValue("");
+				oObjSearch.removeAllTokens();
 			}
 
 			oUI.setProperty("/showEmptyState", false);
@@ -632,30 +721,34 @@ sap.ui.define([
 			oUI.setProperty("/tableBusy", true);
 
 			try {
-				// Rebuild columns + Adapt-Filters fields only when the class actually
-				// changes; on a re-Go for the same class we keep the user's filter input.
 				var sClassType = this.byId("classTypeSelect").getSelectedKey();
-				var bSameClass = this._pageCtx &&
-					this._pageCtx.sClassId === sClassId &&
-					this._pageCtx.sClassType === sClassType;
+				var aChars = await this._fetchCharacteristics(sClassId);
+				var mMeta = await this._fetchCharcMetadata(aChars);
+				this._buildColumns(aChars, oCfg);
 
-				if (!bSameClass) {
-					oUI.setProperty("/showTable", false);
-					var aChars = await this._fetchCharacteristics(sClassId);
-					var mMeta = await this._fetchCharcMetadata(aChars);
-					this._buildColumns(aChars, oCfg);
-					this._pageCtx = {
-						oCfg: oCfg,
-						sClassId: sClassId,
-						sClassType: sClassType,
-						className: oClass.Class,
-						aChars: aChars,
-						mMeta: mMeta
-					};
-				}
+				// Load the whole class's object keys + headers up front (both are thin),
+				// so we can sort across the whole class while still fetching the heavy
+				// characteristic values only for the visible page.
+				var aKeys = await this._fetchAllObjectKeys(oCfg, sClassId, sClassType);
+				var mHeaders = await this._fetchHeaders(oCfg, aKeys);
+				var oContext = { className: oClass.Class, classId: sClassId };
 
-				// Apply whatever criteria the user set in Adapt Filters (server-side).
-				await this._applyCriteria(this._readCriteria());
+				this._pageCtx = {
+					oCfg: oCfg,
+					sClassId: sClassId,
+					sClassType: sClassType,
+					className: oClass.Class,
+					aChars: aChars,
+					mMeta: mMeta,
+					keys: aKeys,
+					headers: mHeaders,
+					sortVals: this._buildSortVals(oCfg, aKeys, mHeaders, oContext),
+					sortField: oCfg.fixedColumns[0].key,
+					sortDesc: false
+				};
+
+				this._sortKeys();
+				await this._loadPage(0);
 			} catch (oError) {
 				this._showError(this._bundle().getText("dataLoadError", [this._extractError(oError)]));
 				oUI.setProperty("/showEmptyState", true);
@@ -668,139 +761,136 @@ sap.ui.define([
 		 * one condition per non-empty characteristic field, plus the object-number field.
 		 * @returns {{charcs: object[], object: string}}
 		 */
-		_readCriteria: function () {
-			var aCharcs = [];
-			var sObject = "";
-			var oFilterBar = this.byId("filterbar");
-			if (oFilterBar) {
-				oFilterBar.getFilterGroupItems().forEach(function (oItem) {
-					if (oItem.getGroupName() !== "values") {
-						return;
-					}
-					var oControl = oItem.getControl();
-					var sVal = (oControl && oControl.getValue) ? (oControl.getValue() || "").trim() : "";
-					if (!sVal) {
-						return;
-					}
-					var sProp = oItem.getName();
-					if (sProp.indexOf("C_") === 0) {
-						aCharcs.push({ charcId: sProp.substring(2), label: oItem.getLabel(), value: sVal });
-					} else if (sProp === "objNumber") {
-						sObject = sVal;
-					}
-				});
-			}
-			return { charcs: aCharcs, object: sObject };
+		/**
+		 * Fetch ALL object keys for the class (thin — one column) from the
+		 * class-assignment entity.
+		 * @returns {Promise<string[]>}
+		 */
+		_fetchAllObjectKeys: async function (oCfg, sClassId, sClassType) {
+			var sKeyField = oCfg.objectKeyField;
+			var aRows = await this._read(this._model(oCfg.modelName), oCfg.keyClassSet, {
+				"$filter": "ClassInternalID eq '" + this._esc(sClassId) + "' and ClassType eq '" + this._esc(sClassType) + "'",
+				"$select": sKeyField,
+				"$orderby": sKeyField,
+				"$top": MAX_LIST_ROWS
+			});
+			return aRows.map(function (o) { return o[sKeyField]; }).filter(Boolean);
 		},
 
 		/**
-		 * Apply the criteria server-side: resolve the matching object keys (or clear
-		 * the filter), then load page 1 of the (filtered) result.
-		 * @param {{charcs: object[], object: string}} oCriteria
+		 * Pre-compute the sortable (fixed-column) values per object from the headers,
+		 * so sorting the whole class is a cheap client-side compare.
+		 * @returns {object} map objectKey -> { fixedColumnKey: value }
 		 */
-		_applyCriteria: async function (oCriteria) {
-			var oUI = this._ui();
+		_buildSortVals: function (oCfg, aKeys, mHeaders, oContext) {
+			var mSortVals = {};
+			aKeys.forEach(function (sKey) {
+				var oHeader = mHeaders[sKey] || {};
+				var o = {};
+				oCfg.fixedColumns.forEach(function (oFixed) {
+					var v = oFixed.get(sKey, oHeader, null, oContext);
+					o[oFixed.key] = (v === undefined || v === null) ? "" : String(v);
+				});
+				mSortVals[sKey] = o;
+			});
+			return mSortVals;
+		},
+
+		/** Sort the working key list by the active sort field (numeric-aware). */
+		_sortKeys: function () {
+			var ctx = this._pageCtx;
+			if (!ctx || !ctx.keys || !ctx.sortVals) {
+				return;
+			}
+			var sField = ctx.sortField;
+			var bDesc = ctx.sortDesc;
+			var mVals = ctx.sortVals;
+			this._ui().setProperty("/sortField", sField);
+			this._ui().setProperty("/sortDesc", bDesc);
+			ctx.keys.sort(function (a, b) {
+				var va = (mVals[a] && mVals[a][sField]) || "";
+				var vb = (mVals[b] && mVals[b][sField]) || "";
+				var c = va.localeCompare(vb, undefined, { numeric: true, sensitivity: "base" });
+				return bDesc ? -c : c;
+			});
+		},
+
+		/** Apply a sort field/direction across the whole class and reload page 1. */
+		_setSort: function (sField, bDesc) {
 			var ctx = this._pageCtx;
 			if (!ctx) {
 				return;
 			}
-			var bHasCriteria = (oCriteria.charcs.length > 0) || !!oCriteria.object;
-			oUI.setProperty("/tableBusy", true);
+			ctx.sortField = sField;
+			ctx.sortDesc = !!bDesc;
+			this._ui().setProperty("/sortField", sField);
+			this._ui().setProperty("/sortDesc", !!bDesc);
+			this._sortKeys();
+			this._reflectSortOnColumns();
+			this._loadPage(0);
+		},
 
-			try {
-				if (!bHasCriteria) {
-					this._filteredKeys = null;
-					oUI.setProperty("/filterActive", false);
-					oUI.setProperty("/filterInfo", "");
-				} else {
-					this._filteredKeys = await this._resolveFilteredKeys(ctx, oCriteria);
-					var iConds = oCriteria.charcs.length + (oCriteria.object ? 1 : 0);
-					oUI.setProperty("/filterActive", true);
-					oUI.setProperty("/filterInfo", this._bundle().getText("filterActiveInfo", [this._filteredKeys.length, iConds]));
+		/** List-view sort button: sort by its field, toggling direction if re-clicked. */
+		onSortFieldPress: function (oEvent) {
+			var ctx = this._pageCtx;
+			if (!ctx) {
+				return;
+			}
+			var oItem = oEvent.getSource().getBindingContext("ui").getObject();
+			var bDesc = (ctx.sortField === oItem.key) ? !ctx.sortDesc : false;
+			this._setSort(oItem.key, bDesc);
+		},
+
+		/** Open the sort dialog (drives sorting for both table and list views). */
+		onSortPress: function () {
+			var ctx = this._pageCtx;
+			if (!ctx) {
+				return;
+			}
+			if (!this._oSortDialog) {
+				this._oSortDialog = new ViewSettingsDialog({ confirm: this.onSortConfirm.bind(this) });
+				this.getView().addDependent(this._oSortDialog);
+			}
+			this._oSortDialog.removeAllSortItems();
+			ctx.oCfg.fixedColumns.forEach(function (oFixed) {
+				this._oSortDialog.addSortItem(new ViewSettingsItem({
+					key: oFixed.key,
+					text: oFixed.label,
+					selected: oFixed.key === ctx.sortField
+				}));
+			}, this);
+			this._oSortDialog.setSortDescending(!!ctx.sortDesc);
+			this._oSortDialog.open();
+		},
+
+		onSortConfirm: function (oEvent) {
+			var ctx = this._pageCtx;
+			if (!ctx) {
+				return;
+			}
+			var oItem = oEvent.getParameter("sortItem");
+			ctx.sortField = oItem ? oItem.getKey() : ctx.oCfg.fixedColumns[0].key;
+			ctx.sortDesc = oEvent.getParameter("sortDescending");
+			this._sortKeys();
+			this._reflectSortOnColumns();
+			this._loadPage(0);
+		},
+
+		/** Reflect the active sort on the table column headers. */
+		_reflectSortOnColumns: function () {
+			var ctx = this._pageCtx;
+			var oTable = this.byId("resultTable");
+			if (!ctx || !oTable) {
+				return;
+			}
+			var sOrder = ctx.sortDesc ? SortOrder.Descending : SortOrder.Ascending;
+			oTable.getColumns().forEach(function (oCol) {
+				var bActive = oCol.getSortProperty() === ctx.sortField;
+				oCol.setSorted(bActive);
+				if (bActive) {
+					oCol.setSortOrder(sOrder);
 				}
-				await this._loadPage(0);
-			} catch (oError) {
-				this._showError(this._bundle().getText("dataLoadError", [this._extractError(oError)]));
-				oUI.setProperty("/tableBusy", false);
-			}
-		},
-
-		/**
-		 * Resolve the object keys (within the class) that satisfy ALL criteria, by
-		 * intersecting per-condition matches found server-side. Each characteristic
-		 * condition is a cheap key-field ($filter on CharcInternalID) lookup.
-		 * @returns {Promise<string[]>} matching object keys, sorted
-		 */
-		_resolveFilteredKeys: async function (ctx, oCriteria) {
-			var that = this;
-			var oCfg = ctx.oCfg;
-			var sKeyField = oCfg.objectKeyField;
-			var oModel = this._model(oCfg.modelName);
-			var aSets = [];
-
-			// one query per characteristic condition -> set of matching object keys
-			var aCharcSets = await Promise.all(oCriteria.charcs.map(function (oCond) {
-				return that._read(oModel, oCfg.valueSet, {
-					"$filter": oCfg.charcIdField + " eq '" + that._esc(oCond.charcId) +
-						"' and substringof('" + that._esc(oCond.value) + "',CharcValue)",
-					"$select": sKeyField + ",ClassInternalID",
-					"$top": MAX_VALUE_ROWS
-				}).then(function (aRows) {
-					var oSet = {};
-					aRows.forEach(function (r) {
-						if (r.ClassInternalID === ctx.sClassId && r[sKeyField]) {
-							oSet[r[sKeyField]] = true;
-						}
-					});
-					return oSet;
-				});
-			}));
-			aCharcSets.forEach(function (oSet) { aSets.push(oSet); });
-
-			// object-number condition (from the class-assignment entity)
-			if (oCriteria.object) {
-				var aKeyRows = await this._read(oModel, oCfg.keyClassSet, {
-					"$filter": "ClassInternalID eq '" + this._esc(ctx.sClassId) + "' and ClassType eq '" +
-						this._esc(ctx.sClassType) + "' and substringof('" + this._esc(oCriteria.object) + "'," + sKeyField + ")",
-					"$select": sKeyField,
-					"$top": MAX_LIST_ROWS
-				});
-				var oObjSet = {};
-				aKeyRows.forEach(function (r) { if (r[sKeyField]) { oObjSet[r[sKeyField]] = true; } });
-				aSets.push(oObjSet);
-			}
-
-			if (!aSets.length) {
-				return [];
-			}
-
-			// intersect all sets
-			var aKeys = Object.keys(aSets[0]).filter(function (k) {
-				return aSets.every(function (oSet) { return oSet[k]; });
 			});
-			aKeys.sort();
-			return aKeys;
-		},
-
-		/** Clear the whole-class filter criteria and reload the unfiltered class. */
-		onClearFilters: function () {
-			var oFilterBar = this.byId("filterbar");
-			if (oFilterBar) {
-				oFilterBar.getFilterGroupItems().forEach(function (oItem) {
-					if (oItem.getGroupName() === "values") {
-						var oControl = oItem.getControl();
-						if (oControl && oControl.setValue) {
-							oControl.setValue("");
-						}
-					}
-				});
-			}
-			this._filteredKeys = null;
-			this._ui().setProperty("/filterActive", false);
-			this._ui().setProperty("/filterInfo", "");
-			if (this._pageCtx) {
-				this._loadPage(0);
-			}
 		},
 
 		/**
@@ -821,10 +911,10 @@ sap.ui.define([
 			try {
 				// 1. page of object keys (+ total count)
 				var aKeys, iTotal;
-				if (this._filteredKeys) {
+				if (ctx.keys) {
 					// filtered: page the pre-resolved matching keys client-side
-					iTotal = this._filteredKeys.length;
-					aKeys = this._filteredKeys.slice(iPageIndex * iPageSize, (iPageIndex * iPageSize) + iPageSize);
+					iTotal = ctx.keys.length;
+					aKeys = ctx.keys.slice(iPageIndex * iPageSize, (iPageIndex * iPageSize) + iPageSize);
 				} else {
 					// unfiltered: server paging via the class-assignment entity
 					var oPage = await this._fetchObjectKeyPage(ctx, iPageIndex * iPageSize, iPageSize);
@@ -837,7 +927,7 @@ sap.ui.define([
 					oUI.setProperty("/listRows", []);
 					oUI.setProperty("/showTable", false);
 					oUI.setProperty("/showNoData", true);
-					oUI.setProperty("/noDataTitle", this._bundle().getText(this._filteredKeys ? "noMatchTitle" : "noDataTitle", [ctx.className]));
+					oUI.setProperty("/noDataTitle", this._bundle().getText("noDataTitle", [ctx.className]));
 					this._updatePagination(0, iPageSize, iTotal || 0);
 					return;
 				}
@@ -846,7 +936,7 @@ sap.ui.define([
 				var aValues = await this._fetchValuesForKeys(ctx.oCfg, aKeys, ctx.sClassId, ctx.classByKey);
 
 				// 3. headers for these objects
-				var mHeaders = await this._fetchHeaders(ctx.oCfg, aKeys);
+				var mHeaders = ctx.headers || await this._fetchHeaders(ctx.oCfg, aKeys);
 
 				// 4. pivot — seed with the page keys so every object shows a row even
 				//    if it has no display-relevant values
@@ -1025,7 +1115,7 @@ sap.ui.define([
 			}
 
 			var oModel = this._model(oCfg.modelName);
-			var aChunks = this._chunk(aKeys, 30);
+			var aChunks = this._chunk(aKeys, 100);
 
 			var aResponses = await Promise.all(aChunks.map(function (aChunk) {
 				var sFilter = aChunk.map(function (k) {
@@ -1247,7 +1337,6 @@ sap.ui.define([
 					template: new Text({ text: "{ui>" + oFixed.key + "}", wrapping: false }),
 					width: oFixed.width,
 					sortProperty: oFixed.key,
-					filterProperty: oFixed.key,
 					autoResizable: true
 				}));
 				aColumnConfig.push({ label: oFixed.label, property: oFixed.key });
@@ -1263,17 +1352,17 @@ sap.ui.define([
 					label: new Label({ text: oChar.Characteristic, tooltip: oChar.Characteristic }),
 					template: new Text({ text: "{ui>" + sProp + "}", wrapping: false }),
 					width: "10rem",
-					sortProperty: sProp,
-					filterProperty: sProp,
-					autoResizable: true
+															autoResizable: true
 				}));
 				aColumnConfig.push({ label: oChar.Characteristic, property: sProp });
 			});
 
 			this._ui().setProperty("/columnConfig", aColumnConfig);
 
-			// (re)build the dedicated value-filter fields in the filter bar
-			this._buildValueFilters(aColumnConfig);
+			// sortable fields (the fixed columns) for the list-view sort buttons
+			this._ui().setProperty("/sortFields", oCfg.fixedColumns.map(function (oFixed) {
+				return { key: oFixed.key, label: oFixed.label };
+			}));
 		},
 
 		/**
@@ -1540,7 +1629,7 @@ sap.ui.define([
 			oUI.setProperty("/filterInfo", "");
 			var oObjSearch = this.byId("objectSearch");
 			if (oObjSearch) {
-				oObjSearch.setValue("");
+				oObjSearch.removeAllTokens();
 			}
 
 			// drop result-filter state and the dedicated value-filter fields
