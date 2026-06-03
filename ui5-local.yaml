@@ -1,0 +1,28 @@
+specVersion: "3.1"
+metadata:
+  name: cfa-characteristics-report
+type: application
+server:
+  customMiddleware:
+    - name: fiori-tools-appreload
+      afterMiddleware: compression
+      configuration:
+        port: 35729
+        path: webapp
+        delay: 300
+    # Pure-local proxy: no destination, point `url` straight at a reachable backend
+    # (e.g. an on-prem gateway, a tunnelled S/4 system, or a mock server). Auth is
+    # whatever the backend expects — set basic-auth env vars or use a tunnel.
+    - name: fiori-tools-proxy
+      afterMiddleware: compression
+      configuration:
+        ignoreCertError: true
+        backend:
+          - path: /sap
+            url: https://REPLACE-WITH-LOCAL-OR-TUNNELLED-BACKEND
+        ui5:
+          path:
+            - /resources
+            - /test-resources
+          url: https://ui5.sap.com
+          version: 1.120.20

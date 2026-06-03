@@ -1,0 +1,18 @@
+{
+  "welcomeFile": "/index.html",
+  "authenticationMethod": "route",
+  "routes": [
+    {
+      "source": "^/sap/opu/odata/sap/(.*)$",
+      "target": "/sap/opu/odata/sap/$1",
+      "destination": "S4HC_Connection",
+      "authenticationType": "xsuaa",
+      "csrfProtection": true
+    },
+    {
+      "source": "^/(.*)$",
+      "localDir": "webapp",
+      "authenticationType": "xsuaa"
+    }
+  ]
+}

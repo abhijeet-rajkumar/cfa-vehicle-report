@@ -134,3 +134,12 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# MTA / Cloud Foundry build output
+mta_archives/
+.mta/
+mta-op-*/
+router/resources/
+
+# Approuter local run config (may hold credentials)
+default-env.json

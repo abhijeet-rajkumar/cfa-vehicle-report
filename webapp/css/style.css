@@ -1,0 +1,10 @@
+/*
+ * Project-specific styles.
+ * v1 uses the default sap_horizon theme with no custom branding — this file is
+ * intentionally an (almost) empty placeholder for future layout tweaks.
+ */
+
+/* Keep dynamic-column cells on a single line so wide tables stay readable. */
+.sapUiTableCell .sapMText {
+	white-space: nowrap;
+}

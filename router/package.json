@@ -1,0 +1,15 @@
+{
+  "name": "cfa-charlist-approuter",
+  "version": "1.0.0",
+  "description": "Standalone approuter for the CFA Technical Object Characteristics Report",
+  "private": true,
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@sap/approuter": "^14.4.2"
+  },
+  "scripts": {
+    "start": "node node_modules/@sap/approuter/approuter.js"
+  }
+}

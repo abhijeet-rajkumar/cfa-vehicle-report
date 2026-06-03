@@ -1,0 +1,63 @@
+_schema-version: "3.3.0"
+ID: cfa-characteristics-report
+version: 1.0.0
+description: CFA Technical Object Characteristics Report - standalone approuter app
+
+parameters:
+  enable-parallel-deployments: true
+
+modules:
+  # ----------------------------------------------------------------
+  # 1) Build the UI5 app into dist/. Build-only: it produces no
+  #    deployable artifact of its own (supported-platforms: []) and
+  #    is consumed by the approuter module below.
+  # ----------------------------------------------------------------
+  - name: cfa-charlist-ui
+    type: html5
+    path: .
+    build-parameters:
+      builder: custom
+      commands:
+        - npm install
+        - npm run build
+      supported-platforms: []
+      build-result: dist
+
+  # ----------------------------------------------------------------
+  # 2) Standalone approuter. Serves the built UI5 app statically and
+  #    routes /sap/opu/odata/sap/* through the S4HC_Connection
+  #    destination. The built app is copied into router/resources at
+  #    build time from the module above.
+  # ----------------------------------------------------------------
+  - name: cfa-charlist-approuter
+    type: approuter.nodejs
+    path: router
+    requires:
+      - name: cfa-charlist-uaa
+      - name: cfa-charlist-dest
+    build-parameters:
+      requires:
+        - name: cfa-charlist-ui
+          target-path: resources
+          artifacts:
+            - "./*"
+    parameters:
+      memory: 256M
+      disk-quota: 512M
+
+resources:
+  # xsuaa instance backing the route authentication in xs-app.json
+  - name: cfa-charlist-uaa
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: xsuaa
+      service-plan: application
+      path: ./xs-security.json
+
+  # destination service (lite) so the approuter can read the
+  # subaccount-level S4HC_Connection destination
+  - name: cfa-charlist-dest
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: destination
+      service-plan: lite

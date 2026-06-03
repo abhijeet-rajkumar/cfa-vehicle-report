@@ -1,0 +1,30 @@
+specVersion: "3.1"
+metadata:
+  name: cfa-characteristics-report
+type: application
+server:
+  customMiddleware:
+    # Live-reload while developing in BAS / locally
+    - name: fiori-tools-appreload
+      afterMiddleware: compression
+      configuration:
+        port: 35729
+        path: webapp
+        delay: 300
+    # Proxy OData (/sap/...) calls through the destination, and UI5 resources to the CDN.
+    # In SAP Business Application Studio the `destination` field is honoured and routes
+    # through S4HC_Connection. For pure-local runs see ui5-local.yaml.
+    - name: fiori-tools-proxy
+      afterMiddleware: compression
+      configuration:
+        ignoreCertError: false
+        backend:
+          - path: /sap
+            url: https://REPLACE-WITH-S4HC-HOST.s4hana.cloud.sap
+            destination: S4HC_Connection
+        ui5:
+          path:
+            - /resources
+            - /test-resources
+          url: https://ui5.sap.com
+          version: 1.120.20

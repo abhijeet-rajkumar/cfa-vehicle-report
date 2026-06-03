@@ -1,0 +1,22 @@
+{
+  "name": "cfa-characteristics-report",
+  "version": "1.0.0",
+  "description": "CFA Technical Object Characteristics List Report - dynamic-column classified object viewer (SAPUI5)",
+  "private": true,
+  "scripts": {
+    "start": "ui5 serve --config ui5.yaml --open index.html",
+    "start-local": "ui5 serve --config ui5-local.yaml --open index.html",
+    "build": "ui5 build --config ui5.yaml --clean-dest --dest dist",
+    "lint": "eslint webapp"
+  },
+  "devDependencies": {
+    "@ui5/cli": "^3.11.0",
+    "@sap/ux-ui5-tooling": "^1.15.4",
+    "eslint": "^8.57.0"
+  },
+  "ui5": {
+    "dependencies": [
+      "@sap/ux-ui5-tooling"
+    ]
+  }
+}
