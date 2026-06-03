@@ -20,7 +20,7 @@
 					<Label text="{i18n>appSubtitle}" />
 				</f:expandedContent>
 				<f:actions>
-					<SegmentedButton selectedKey="{ui>/viewMode}">
+					<SegmentedButton selectedKey="{ui>/viewMode}" enabled="{= !${ui>/multiClass} }">
 						<items>
 							<SegmentedButtonItem key="table" icon="sap-icon://table-view" tooltip="{i18n>tableView}" />
 							<SegmentedButtonItem key="list" icon="sap-icon://list" tooltip="{i18n>listView}" />
@@ -59,17 +59,18 @@
 						</fb:FilterGroupItem>
 						<fb:FilterGroupItem name="class" label="{i18n>filterClass}" groupName="main" visibleInFilterBar="true">
 							<fb:control>
-								<ComboBox
+								<MultiComboBox
 									id="classSelect"
-									selectedKey="{ui>/classId}"
+									selectedKeys="{ui>/classIds}"
 									enabled="{ui>/classSelectEnabled}"
 									busy="{ui>/classBusy}"
 									busyIndicatorDelay="0"
 									placeholder="{i18n>classPlaceholder}"
 									width="100%"
+									selectionChange="onClassChange"
 									items="{ path: 'ui>/classes', templateShareable: false }">
-									<core:ListItem key="{ui>ClassInternalID}" text="{ui>__display}" additionalText="{ui>ClassGroup}" />
-								</ComboBox>
+									<core:Item key="{ui>ClassInternalID}" text="{ui>__display}" />
+								</MultiComboBox>
 							</fb:control>
 						</fb:FilterGroupItem>
 						<fb:FilterGroupItem name="object" label="{i18n>filterObjectSearch}" groupName="main" visibleInFilterBar="true">

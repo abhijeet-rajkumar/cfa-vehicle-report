@@ -48,6 +48,8 @@ sap.ui.define([
 			var oUI = new JSONModel({
 				classType: "002",
 				classId: "",
+				classIds: [],
+				multiClass: false,
 				classes: [],
 				classSelectEnabled: false,
 				classBusy: false,
@@ -174,7 +176,8 @@ sap.ui.define([
 			var oUI = this._ui();
 
 			// Class dropdown is dependent: clear it and reload for the new type.
-			oUI.setProperty("/classId", "");
+			oUI.setProperty("/classIds", []);
+			oUI.setProperty("/multiClass", false);
 			oUI.setProperty("/classes", []);
 			oUI.setProperty("/classSelectEnabled", false);
 
@@ -184,20 +187,37 @@ sap.ui.define([
 			this._loadClasses(sClassType);
 		},
 
+		onClassChange: function () {
+			var aIds = this.byId("classSelect").getSelectedKeys();
+			var oUI = this._ui();
+			var bMulti = aIds.length > 1;
+			oUI.setProperty("/multiClass", bMulti);
+			if (bMulti) {
+				oUI.setProperty("/viewMode", "list");
+			}
+			// the characteristic filter belongs to the previous class set
+			oUI.setProperty("/charcOptions", []);
+			var oCharc = this.byId("charcSelect");
+			if (oCharc) {
+				oCharc.setSelectedKeys([]);
+			}
+		},
+
 		onClearPress: function () {
 			var oUI = this._ui();
-			oUI.setProperty("/classId", "");
+			oUI.setProperty("/classIds", []);
+			oUI.setProperty("/multiClass", false);
 			this._resetResults();
 		},
 
 		onGoPress: function () {
 			var oUI = this._ui();
 			var sClassType = this.byId("classTypeSelect").getSelectedKey();
-			var sClassId = this.byId("classSelect").getSelectedKey();
+			var aClassIds = this.byId("classSelect").getSelectedKeys();
 
 			this._hideError();
 
-			if (!sClassId) {
+			if (!aClassIds.length) {
 				MessageToast.show(this._bundle().getText("selectClassFirst"));
 				return;
 			}
@@ -210,16 +230,18 @@ sap.ui.define([
 				return;
 			}
 
-			var oClass = (oUI.getProperty("/classes") || []).filter(function (c) {
-				return c.ClassInternalID === sClassId;
-			})[0];
+			var aAllClasses = oUI.getProperty("/classes") || [];
+			var aClasses = aClassIds.map(function (sId) {
+				var oC = aAllClasses.filter(function (c) { return c.ClassInternalID === sId; })[0];
+				return oC ? { ClassInternalID: oC.ClassInternalID, Class: oC.Class, ClassType: sClassType } : null;
+			}).filter(Boolean);
 
-			if (!oClass) {
+			if (!aClasses.length) {
 				this._showError(this._bundle().getText("classNotFound"));
 				return;
 			}
 
-			this._loadResults(oCfg, sClassId, oClass);
+			this._loadResults(oCfg, aClasses);
 		},
 
 		onColumnSort: function (oEvent) {
@@ -735,7 +757,87 @@ sap.ui.define([
 		/* result orchestration                                        */
 		/* =========================================================== */
 
-		_loadResults: async function (oCfg, sClassId, oClass) {
+		_loadResults: async function (oCfg, aClasses) {
+			var oUI = this._ui();
+			var that = this;
+			var sClassType = this.byId("classTypeSelect").getSelectedKey();
+			var aClassIds = aClasses.map(function (c) { return c.ClassInternalID; });
+			var sClassKey = aClassIds.slice().sort().join(",");
+
+			// when the class set changes, clear the (now stale) filters
+			if (!this._pageCtx || this._pageCtx.classKey !== sClassKey) {
+				this._clearFilters();
+			}
+
+			oUI.setProperty("/showEmptyState", false);
+			oUI.setProperty("/showNoData", false);
+			oUI.setProperty("/showTable", false);
+			oUI.setProperty("/tableBusy", true);
+
+			try {
+				// union of characteristics across the selected class(es)
+				var oUnion = await this._fetchUnionCharacteristics(aClassIds);
+				this._buildColumns(oUnion.chars, oCfg);
+
+				// object keys + per-object class map across all selected classes
+				var aPerClass = await Promise.all(aClasses.map(function (oClass) {
+					return that._fetchAllObjectKeys(oCfg, oClass.ClassInternalID, sClassType).then(function (aKeys) {
+						return { cls: oClass, keys: aKeys };
+					});
+				}));
+				var mClassByKey = {};
+				var aAllKeys = [];
+				aPerClass.forEach(function (o) {
+					o.keys.forEach(function (sKey) {
+						if (sKey && !mClassByKey[sKey]) {
+							mClassByKey[sKey] = { ClassInternalID: o.cls.ClassInternalID, Class: o.cls.Class };
+							aAllKeys.push(sKey);
+						}
+					});
+				});
+
+				var mHeaders = await this._fetchHeaders(oCfg, aAllKeys);
+				var bMulti = aClasses.length > 1;
+				var oContext = {
+					className: bMulti ? this._bundle().getText("multipleClasses") : aClasses[0].Class,
+					classId: bMulti ? null : aClasses[0].ClassInternalID,
+					classByKey: mClassByKey
+				};
+
+				this._pageCtx = {
+					oCfg: oCfg,
+					sClassType: sClassType,
+					classKey: sClassKey,
+					sClassId: oContext.classId,
+					className: oContext.className,
+					classByKey: mClassByKey,
+					aChars: oUnion.chars,
+					mMeta: oUnion.meta,
+					allKeys: aAllKeys,
+					keys: aAllKeys.slice(),
+					headers: mHeaders,
+					sortVals: this._buildSortVals(oCfg, aAllKeys, mHeaders, oContext),
+					sortField: oCfg.fixedColumns[0].key,
+					sortDesc: false
+				};
+
+				oUI.setProperty("/charcOptions", oUnion.chars.map(function (oChar) {
+					return { key: oChar.CharcInternalID, text: oChar.Characteristic };
+				}));
+				oUI.setProperty("/multiClass", bMulti);
+				if (bMulti) {
+					oUI.setProperty("/viewMode", "list");
+				}
+
+				await this._applyAllFilters();
+			} catch (oError) {
+				this._showError(this._bundle().getText("dataLoadError", [this._extractError(oError)]));
+				oUI.setProperty("/showEmptyState", true);
+				oUI.setProperty("/tableBusy", false);
+			}
+		},
+
+		_loadResultsLegacy: async function (oCfg, sClassId, oClass) {
 			var oUI = this._ui();
 
 			// when the class changes, clear the (now class-specific) filters
@@ -925,7 +1027,8 @@ sap.ui.define([
 				}).then(function (aRows) {
 					var oSet = {};
 					aRows.forEach(function (r) {
-						if (r.ClassInternalID === ctx.sClassId && r[sKeyField]) {
+						var oC = ctx.classByKey && ctx.classByKey[r[sKeyField]];
+						if (oC && r.ClassInternalID === oC.ClassInternalID) {
 							oSet[r[sKeyField]] = true;
 						}
 					});
