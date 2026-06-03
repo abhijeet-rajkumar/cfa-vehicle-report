@@ -79,8 +79,28 @@
 									width="100%"
 									placeholder="{i18n>objectSearchPlaceholder}"
 									showValueHelp="true"
-									valueHelpRequest="onObjectValueHelp"
-									tokenUpdate="onObjectTokenUpdate" />
+									valueHelpRequest="onObjectValueHelp" />
+							</fb:control>
+						</fb:FilterGroupItem>
+						<fb:FilterGroupItem name="charc" label="{i18n>filterCharc}" groupName="main" visibleInFilterBar="true">
+							<fb:control>
+								<MultiComboBox
+									id="charcSelect"
+									width="100%"
+									placeholder="{i18n>charcPlaceholder}"
+									items="{ path: 'ui>/charcOptions', templateShareable: false }">
+									<core:Item key="{ui>key}" text="{ui>text}" />
+								</MultiComboBox>
+							</fb:control>
+						</fb:FilterGroupItem>
+						<fb:FilterGroupItem name="charcValue" label="{i18n>filterCharcValue}" groupName="main" visibleInFilterBar="true">
+							<fb:control>
+								<MultiInput
+									id="charcValueSearch"
+									width="100%"
+									placeholder="{i18n>charcValuePlaceholder}"
+									showValueHelp="true"
+									valueHelpRequest="onCharcValueValueHelp" />
 							</fb:control>
 						</fb:FilterGroupItem>
 					</fb:filterGroupItems>

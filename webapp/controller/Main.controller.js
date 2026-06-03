@@ -69,9 +69,12 @@ sap.ui.define([
 				pageNextEnabled: false,
 
 				// view switch (table | list) + list-view options
-				viewMode: "table",
+				viewMode: "list",
 				showEmpty: false,
 				listRows: [],
+
+				// characteristic filter options (populated from the loaded class)
+				charcOptions: [],
 
 				// sorting (mirrored from the page context for the list-view buttons)
 				sortFields: [],
@@ -312,7 +315,34 @@ sap.ui.define([
 			var aTokens = oEvent.getParameter("tokens");
 			this.byId("objectSearch").setTokens(aTokens);
 			this._oObjectVHD.close();
-			this._runObjectSearch();
+		},
+
+		/** Value Help for the characteristic value filter (conditions tab). */
+		onCharcValueValueHelp: function (oEvent) {
+			var oMultiInput = oEvent.getSource();
+			if (!this._oValueVHD) {
+				this._oValueVHD = new ValueHelpDialog({
+					title: this._bundle().getText("charcValueVHDTitle"),
+					supportRanges: true,
+					supportRangesOnly: true,
+					key: "charcValue",
+					ok: this._onValueVHDOk.bind(this),
+					cancel: function () { this._oValueVHD.close(); }.bind(this)
+				});
+				this.getView().addDependent(this._oValueVHD);
+				this._oValueVHD.setRangeKeyFields([{
+					key: "charcValue",
+					label: this._bundle().getText("filterCharcValue"),
+					type: "string"
+				}]);
+			}
+			this._oValueVHD.setTokens(oMultiInput.getTokens());
+			this._oValueVHD.open();
+		},
+
+		_onValueVHDOk: function (oEvent) {
+			this.byId("charcValueSearch").setTokens(oEvent.getParameter("tokens"));
+			this._oValueVHD.close();
 		},
 
 		/** MultiInput tokens changed (typed or removed) -> run the object search. */
@@ -708,11 +738,10 @@ sap.ui.define([
 		_loadResults: async function (oCfg, sClassId, oClass) {
 			var oUI = this._ui();
 
-			// new class -> clear any object-number search
-			this._objectSearch = "";
-			var oObjSearch = this.byId("objectSearch");
-			if (oObjSearch) {
-				oObjSearch.removeAllTokens();
+			// when the class changes, clear the (now class-specific) filters
+			if (!this._pageCtx || this._pageCtx.sClassId !== sClassId ||
+				this._pageCtx.sClassType !== this.byId("classTypeSelect").getSelectedKey()) {
+				this._clearFilters();
 			}
 
 			oUI.setProperty("/showEmptyState", false);
@@ -740,15 +769,21 @@ sap.ui.define([
 					className: oClass.Class,
 					aChars: aChars,
 					mMeta: mMeta,
-					keys: aKeys,
+					allKeys: aKeys,
+					keys: aKeys.slice(),
 					headers: mHeaders,
 					sortVals: this._buildSortVals(oCfg, aKeys, mHeaders, oContext),
 					sortField: oCfg.fixedColumns[0].key,
 					sortDesc: false
 				};
 
-				this._sortKeys();
-				await this._loadPage(0);
+				// characteristics available to the filter (from this class)
+				oUI.setProperty("/charcOptions", aChars.map(function (oChar) {
+					return { key: oChar.CharcInternalID, text: oChar.Characteristic };
+				}));
+
+				// apply the filter-bar criteria (object number / characteristic / value)
+				await this._applyAllFilters();
 			} catch (oError) {
 				this._showError(this._bundle().getText("dataLoadError", [this._extractError(oError)]));
 				oUI.setProperty("/showEmptyState", true);
@@ -766,6 +801,161 @@ sap.ui.define([
 		 * class-assignment entity.
 		 * @returns {Promise<string[]>}
 		 */
+		/**
+		 * Apply the filter-bar criteria to the loaded class: object-number conditions
+		 * (matched in memory against the keys we already hold) AND characteristic-value
+		 * conditions (resolved server-side), then sort + show page 1.
+		 */
+		/** Clear all filter-bar criteria (object number / characteristic / value). */
+		_clearFilters: function () {
+			var oObj = this.byId("objectSearch");
+			if (oObj) {
+				oObj.removeAllTokens();
+			}
+			var oVal = this.byId("charcValueSearch");
+			if (oVal) {
+				oVal.removeAllTokens();
+			}
+			var oCharc = this.byId("charcSelect");
+			if (oCharc) {
+				oCharc.setSelectedKeys([]);
+			}
+		},
+
+		_applyAllFilters: async function () {
+			var ctx = this._pageCtx;
+			if (!ctx) {
+				return;
+			}
+			var oUI = this._ui();
+			oUI.setProperty("/tableBusy", true);
+
+			try {
+				var aKeys = (ctx.allKeys || []).slice();
+
+				// object-number conditions (range / equals / contains) — match in memory
+				var aObjConds = this._tokenConditions(this.byId("objectSearch"));
+				if (aObjConds.length) {
+					aKeys = aKeys.filter(function (sKey) {
+						return aObjConds.some(function (oCond) { return this._matchCondition(sKey, oCond); }, this);
+					}, this);
+				}
+
+				// characteristic-value conditions — resolve matching objects server-side
+				var aValConds = this._tokenConditions(this.byId("charcValueSearch"));
+				if (aValConds.length) {
+					var oCharcSelect = this.byId("charcSelect");
+					var aCharcIds = oCharcSelect ? oCharcSelect.getSelectedKeys() : [];
+					var oSet = await this._resolveValueKeys(ctx, aValConds, aCharcIds);
+					aKeys = aKeys.filter(function (sKey) { return oSet[sKey]; });
+				}
+
+				ctx.keys = aKeys;
+				this._sortKeys();
+				await this._loadPage(0);
+			} catch (oError) {
+				this._showError(this._bundle().getText("dataLoadError", [this._extractError(oError)]));
+				oUI.setProperty("/tableBusy", false);
+			}
+		},
+
+		/**
+		 * Extract filter conditions from a MultiInput's tokens. Each condition is
+		 * { operation, value1, value2 } from the value-help range data, or a plain
+		 * equals for a directly-typed token.
+		 */
+		_tokenConditions: function (oMultiInput) {
+			if (!oMultiInput || !oMultiInput.getTokens) {
+				return [];
+			}
+			return oMultiInput.getTokens().map(function (oToken) {
+				var oRange = oToken.data("range");
+				if (oRange && oRange.operation) {
+					return { operation: oRange.operation, value1: oRange.value1, value2: oRange.value2 };
+				}
+				return { operation: "EQ", value1: oToken.getKey() || oToken.getText(), value2: null };
+			}).filter(function (oCond) {
+				return oCond.value1 !== undefined && oCond.value1 !== null && oCond.value1 !== "";
+			});
+		},
+
+		/** Client-side match of a string value against a single condition. */
+		_matchCondition: function (sVal, oCond) {
+			var s = String(sVal == null ? "" : sVal);
+			var v1 = String(oCond.value1 == null ? "" : oCond.value1);
+			var v2 = String(oCond.value2 == null ? "" : oCond.value2);
+			var cmp = function (a, b) { return a.localeCompare(b, undefined, { numeric: true }); };
+			switch (oCond.operation) {
+				case "EQ": return s === v1;
+				case "Contains": return s.indexOf(v1) !== -1;
+				case "StartsWith": return s.indexOf(v1) === 0;
+				case "EndsWith": return s.length >= v1.length && s.lastIndexOf(v1) === s.length - v1.length;
+				case "GT": return cmp(s, v1) > 0;
+				case "GE": return cmp(s, v1) >= 0;
+				case "LT": return cmp(s, v1) < 0;
+				case "LE": return cmp(s, v1) <= 0;
+				case "BT": return cmp(s, v1) >= 0 && cmp(s, v2) <= 0;
+				default: return s.indexOf(v1) !== -1;
+			}
+		},
+
+		/**
+		 * Resolve object keys (within the class) whose value — in any selected
+		 * characteristic, or any characteristic if none selected — matches ANY of the
+		 * value conditions. One server query per value condition.
+		 * @returns {Promise<object>} map objectKey -> true
+		 */
+		_resolveValueKeys: async function (ctx, aValConds, aCharcIds) {
+			var that = this;
+			var oCfg = ctx.oCfg;
+			var sKeyField = oCfg.objectKeyField;
+			var oModel = this._model(oCfg.modelName);
+
+			var sCharcClause = aCharcIds.length
+				? " and (" + aCharcIds.map(function (id) {
+					return oCfg.charcIdField + " eq '" + that._esc(id) + "'";
+				}).join(" or ") + ")"
+				: "";
+
+			var aSets = await Promise.all(aValConds.map(function (oCond) {
+				return that._read(oModel, oCfg.valueSet, {
+					"$filter": that._valueConditionFilter(oCond) + sCharcClause,
+					"$select": sKeyField + ",ClassInternalID",
+					"$top": MAX_VALUE_ROWS
+				}).then(function (aRows) {
+					var oSet = {};
+					aRows.forEach(function (r) {
+						if (r.ClassInternalID === ctx.sClassId && r[sKeyField]) {
+							oSet[r[sKeyField]] = true;
+						}
+					});
+					return oSet;
+				});
+			}));
+
+			var oUnion = {};
+			aSets.forEach(function (oSet) {
+				Object.keys(oSet).forEach(function (k) { oUnion[k] = true; });
+			});
+			return oUnion;
+		},
+
+		/** Build a CharcValue OData clause for a value condition. */
+		_valueConditionFilter: function (oCond) {
+			var v1 = this._esc(oCond.value1);
+			var v2 = this._esc(oCond.value2);
+			switch (oCond.operation) {
+				case "EQ": return "CharcValue eq '" + v1 + "'";
+				case "StartsWith": return "startswith(CharcValue,'" + v1 + "')";
+				case "BT": return "(CharcValue ge '" + v1 + "' and CharcValue le '" + v2 + "')";
+				case "GT": return "CharcValue gt '" + v1 + "'";
+				case "GE": return "CharcValue ge '" + v1 + "'";
+				case "LT": return "CharcValue lt '" + v1 + "'";
+				case "LE": return "CharcValue le '" + v1 + "'";
+				default: return "substringof('" + v1 + "',CharcValue)";
+			}
+		},
+
 		_fetchAllObjectKeys: async function (oCfg, sClassId, sClassType) {
 			var sKeyField = oCfg.objectKeyField;
 			var aRows = await this._read(this._model(oCfg.modelName), oCfg.keyClassSet, {
@@ -1627,19 +1817,16 @@ sap.ui.define([
 			this._filteredKeys = null;
 			oUI.setProperty("/filterActive", false);
 			oUI.setProperty("/filterInfo", "");
-			var oObjSearch = this.byId("objectSearch");
-			if (oObjSearch) {
-				oObjSearch.removeAllTokens();
-			}
+			this._clearFilters();
+			oUI.setProperty("/charcOptions", []);
 
-			// drop result-filter state and the dedicated value-filter fields
+			// drop page-local search state
 			this._resultFilters = {};
 			this._globalSearch = "";
 			var oSearch = this.byId("resultSearch");
 			if (oSearch) {
 				oSearch.setValue("");
 			}
-			this._buildValueFilters([]);
 
 			var oTable = this.byId("resultTable");
 			if (oTable) {
