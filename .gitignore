@@ -141,5 +141,13 @@ mta_archives/
 mta-op-*/
 router/resources/
 
+# mbt-generated Makefiles
+Makefile.mta
+Makefile_*.mta
+
 # Approuter local run config (may hold credentials)
 default-env.json
+
+# Claude Code documents
+CLAUDE.md
+.claude/
