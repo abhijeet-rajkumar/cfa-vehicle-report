@@ -2,15 +2,23 @@ sap.ui.define([
 	"sap/ui/core/mvc/Controller",
 	"sap/ui/model/json/JSONModel",
 	"sap/ui/model/Sorter",
+	"sap/ui/model/Filter",
+	"sap/ui/model/FilterOperator",
 	"sap/ui/table/Column",
 	"sap/ui/table/library",
+	"sap/ui/comp/filterbar/FilterGroupItem",
+	"sap/m/Input",
 	"sap/m/Text",
 	"sap/m/Label",
 	"sap/m/MessageToast",
+	"sap/m/Dialog",
+	"sap/m/List",
+	"sap/m/StandardListItem",
+	"sap/m/Button",
 	"sap/ui/core/format/DateFormat",
 	"sap/ui/export/Spreadsheet",
 	"sap/ui/export/library"
-], function (Controller, JSONModel, Sorter, TableColumn, tableLibrary, Text, Label, MessageToast, DateFormat, Spreadsheet, exportLibrary) {
+], function (Controller, JSONModel, Sorter, Filter, FilterOperator, TableColumn, tableLibrary, FilterGroupItem, Input, Text, Label, MessageToast, Dialog, List, StandardListItem, Button, DateFormat, Spreadsheet, exportLibrary) {
 	"use strict";
 
 	var SortOrder = tableLibrary.SortOrder;
@@ -21,6 +29,11 @@ sap.ui.define([
 
 	// Cap on rows fetched from the value collection (brief: $top=2000).
 	var MAX_VALUE_ROWS = 2000;
+
+	// Safety cap on master-data list reads (classes, characteristics, headers).
+	// Every read is bounded so a wide/unfiltered projection can never trigger the
+	// CDS view's internal volume limit (DBSQL_SQL_INTERNAL_DB_ERROR).
+	var MAX_LIST_ROWS = 5000;
 
 	return Controller.extend("com.cfa.charlist.controller.Main", {
 
@@ -46,10 +59,34 @@ sap.ui.define([
 				noDataTitle: "",
 				tableTitle: "",
 
+				// server paging
+				pageSize: 25,
+				pageInfo: "",
+				pagePrevEnabled: false,
+				pageNextEnabled: false,
+
+				// view switch (table | list) + list-view options
+				viewMode: "table",
+				showEmpty: false,
+				listRows: [],
+
+				// whole-class filter state
+				filterActive: false,
+				filterInfo: "",
+
 				errorVisible: false,
 				errorText: ""
 			});
 			this.getView().setModel(oUI, "ui");
+
+			// Result-filter state, shared by the in-grid column filters and the
+			// dedicated value-filter fields so the two never overwrite each other.
+			// Keyed by column property -> entered filter string.
+			this._resultFilters = {};
+			this._globalSearch = "";
+			this._objectSearch = "";
+			// whole-class server-side filter: null = unfiltered, else the matching keys
+			this._filteredKeys = null;
 
 			// Default Class Type is 002 (already "selected"), so load its classes immediately.
 			this._loadClasses("002");
@@ -69,25 +106,46 @@ sap.ui.define([
 					enabled: true,
 					modelName: "equipment",
 					valueSet: "/EquipClassCharacteristicValue",
-					expandNav: "to_Equipment",
+					// the value collection has no readable Class name — filter by the
+					// internal class id (same id used to fetch the characteristics)
+					filterField: "ClassInternalID",
+					// the characteristic id field on a value row (note: NOT CharcInternalID here)
+					charcIdField: "CharacteristicInternalID",
+					// narrow $select: a wide projection makes this CDS view exceed its
+					// internal volume limit and dump (DBSQL_SQL_INTERNAL_DB_ERROR)
+					valueSelect: "Equipment,ClassInternalID,CharacteristicInternalID,Characteristic,CharcDataType,CharcValue,CharcValuePositionNumber,CharcFromNumericValue,CharcFromDecimalValue,CharcFromDate,CharcFromAmount,Currency",
 					objectKeyField: "Equipment",
+					// header read separately ($expand on the value view dumps on the DB).
+					// Equipment is time-dependent (key includes ValidityEndDate).
+					headerSet: "/Equipment",
+					headerSelect: "Equipment,EquipmentName,MaintenancePlant,ValidityEndDate",
+					headerHasValidity: true,
+					// class-assignment entity used to page the objects in a class
+					keyClassSet: "/EquipmentClass",
 					fixedColumns: [
 						{ key: "objNumber", label: oBundle.getText("colEquipment"), width: "11rem", get: function (sKey) { return sKey; } },
 						{ key: "objDesc", label: oBundle.getText("colDescription"), width: "18rem", get: function (sKey, oHeader) { return oHeader.EquipmentName; } },
-						{ key: "objClass", label: oBundle.getText("colClass"), width: "11rem", get: function (sKey, oHeader, oRow) { return oRow.Class; } },
+						{ key: "objClass", label: oBundle.getText("colClass"), width: "11rem", get: function (sKey, oHeader, oRow, oCtx) { return (oCtx.classByKey && oCtx.classByKey[sKey] && oCtx.classByKey[sKey].Class) || oCtx.className; } },
 						{ key: "MaintenancePlant", label: oBundle.getText("colMaintPlant"), width: "9rem", get: function (sKey, oHeader) { return oHeader.MaintenancePlant; } }
 					]
 				},
 				"003": {
-					enabled: false,
+					enabled: true,
 					modelName: "funcloc",
 					valueSet: "/Value",
-					expandNav: "to_FunctionalLocation",
+					filterField: "ClassInternalID",
+					// the FL value entity keys the characteristic by CharcInternalID
+					charcIdField: "CharcInternalID",
+					valueSelect: "FunctionalLocation,ClassInternalID,CharcInternalID,Characteristic,CharcDataType,CharcValue,CharcValuePositionNumber,CharcFromNumericValue,CharcFromDecimalValue,CharcFromDate,CharcFromAmount,Currency",
 					objectKeyField: "FunctionalLocation",
+					headerSet: "/FunctionalLocation",
+					headerSelect: "FunctionalLocation,FunctionalLocationName,FunctionalLocationCategory,SuperiorFunctionalLocation",
+					headerHasValidity: false,
+					keyClassSet: "/FunctionalLocationClass",
 					fixedColumns: [
 						{ key: "objNumber", label: oBundle.getText("colFuncLoc"), width: "14rem", get: function (sKey) { return sKey; } },
 						{ key: "objDesc", label: oBundle.getText("colDescription"), width: "18rem", get: function (sKey, oHeader) { return oHeader.FunctionalLocationName; } },
-						{ key: "objClass", label: oBundle.getText("colClass"), width: "11rem", get: function (sKey, oHeader, oRow) { return oRow.Class; } },
+						{ key: "objClass", label: oBundle.getText("colClass"), width: "11rem", get: function (sKey, oHeader, oRow, oCtx) { return (oCtx.classByKey && oCtx.classByKey[sKey] && oCtx.classByKey[sKey].Class) || oCtx.className; } },
 						{ key: "FunctionalLocationCategory", label: oBundle.getText("colCategory"), width: "8rem", get: function (sKey, oHeader) { return oHeader.FunctionalLocationCategory; } },
 						{ key: "SuperiorFunctionalLocation", label: oBundle.getText("colSuperiorFL"), width: "14rem", get: function (sKey, oHeader) { return oHeader.SuperiorFunctionalLocation; } }
 					]
@@ -178,6 +236,319 @@ sap.ui.define([
 			});
 		},
 
+		onColumnFilter: function (oEvent) {
+			oEvent.preventDefault();
+			var oColumn = oEvent.getParameter("column");
+			var sValue = oEvent.getParameter("value");
+			var sProp = oColumn.getFilterProperty();
+			if (!sProp) {
+				return;
+			}
+			oColumn.setFiltered(!!sValue);
+			this._setResultFilter(sProp, sValue);
+		},
+
+		onValueFilterChange: function (oEvent) {
+			var oInput = oEvent.getSource();
+			var sProp = oInput.data("prop");
+			var sValue = oEvent.getParameter("value");
+			if (sProp) {
+				this._setResultFilter(sProp, sValue);
+			}
+		},
+
+		onResultSearch: function (oEvent) {
+			// handles both the `search` and `liveChange` events
+			var sValue = oEvent.getParameter("newValue");
+			if (sValue === undefined || sValue === null) {
+				sValue = oEvent.getParameter("query") || "";
+			}
+			this._globalSearch = (sValue || "").trim();
+			this._applyResultFilters();
+		},
+
+		/**
+		 * Standalone object search: look up an object number, determine its class
+		 * (prompt if it's in several), and show just that object.
+		 */
+		onObjectSearch: function (oEvent) {
+			var sVal = oEvent.getParameter("query");
+			if (sVal === undefined || sVal === null) {
+				sVal = oEvent.getParameter("newValue") || "";
+			}
+			sVal = (sVal || "").trim();
+			this._objectSearch = sVal;
+			if (!sVal) {
+				// clearing the box shouldn't wipe the screen — just stop searching
+				return;
+			}
+			// allow several objects at once (comma / space / semicolon separated)
+			var aNums = sVal.split(/[\s,;]+/).filter(Boolean);
+			if (aNums.length > 1) {
+				this._searchObjects(aNums);
+			} else {
+				this._searchObject(aNums[0]);
+			}
+		},
+
+		/**
+		 * Resolve the class(es) an object belongs to, then load it (or prompt to
+		 * choose when it's classified in more than one class).
+		 * @param {string} sNum the object number
+		 */
+		_searchObject: async function (sNum) {
+			var oUI = this._ui();
+			var sType = this.byId("classTypeSelect").getSelectedKey();
+			var oCfg = this._typeConfig(sType);
+
+			this._hideError();
+			if (!oCfg || !oCfg.enabled) {
+				this._showError(this._bundle().getText("typeNotSupported"));
+				return;
+			}
+
+			oUI.setProperty("/showEmptyState", false);
+			oUI.setProperty("/showNoData", false);
+			oUI.setProperty("/tableBusy", true);
+
+			try {
+				var aAssign = await this._read(this._model(oCfg.modelName), oCfg.keyClassSet, {
+					"$filter": oCfg.objectKeyField + " eq '" + this._esc(sNum) + "'",
+					"$select": oCfg.objectKeyField + ",ClassInternalID,ClassType,Class",
+					"$top": MAX_LIST_ROWS
+				});
+
+				// distinct classes the object is assigned to
+				var oSeen = {};
+				var aClasses = [];
+				aAssign.forEach(function (o) {
+					if (o.ClassInternalID && !oSeen[o.ClassInternalID]) {
+						oSeen[o.ClassInternalID] = true;
+						aClasses.push({ ClassInternalID: o.ClassInternalID, ClassType: o.ClassType, Class: o.Class });
+					}
+				});
+
+				if (!aClasses.length) {
+					oUI.setProperty("/rows", []);
+					oUI.setProperty("/showTable", false);
+					oUI.setProperty("/showNoData", true);
+					oUI.setProperty("/noDataTitle", this._bundle().getText("objectNotFound", [sNum]));
+					oUI.setProperty("/tableBusy", false);
+					return;
+				}
+
+				oUI.setProperty("/tableBusy", false);
+				if (aClasses.length === 1) {
+					await this._loadSingleObject(oCfg, sNum, aClasses[0]);
+				} else {
+					this._promptClassChoice(oCfg, sNum, aClasses);
+				}
+			} catch (oError) {
+				this._showError(this._bundle().getText("dataLoadError", [this._extractError(oError)]));
+				oUI.setProperty("/tableBusy", false);
+			}
+		},
+
+		/** Load a single object's row for a resolved class. */
+		_loadSingleObject: async function (oCfg, sNum, oClass) {
+			var oUI = this._ui();
+			oUI.setProperty("/showEmptyState", false);
+			oUI.setProperty("/showNoData", false);
+			oUI.setProperty("/showTable", false);
+			oUI.setProperty("/tableBusy", true);
+
+			try {
+				// reflect the resolved class in the filter bar
+				oUI.setProperty("/classType", oClass.ClassType);
+				oUI.setProperty("/classId", oClass.ClassInternalID);
+
+				var aChars = await this._fetchCharacteristics(oClass.ClassInternalID);
+				var mMeta = await this._fetchCharcMetadata(aChars);
+				this._buildColumns(aChars, oCfg);
+
+				this._pageCtx = {
+					oCfg: oCfg,
+					sClassId: oClass.ClassInternalID,
+					sClassType: oClass.ClassType,
+					className: oClass.Class,
+					aChars: aChars,
+					mMeta: mMeta
+				};
+
+				var aValues = await this._fetchValuesForKeys(oCfg, [sNum], oClass.ClassInternalID);
+				var mHeaders = await this._fetchHeaders(oCfg, [sNum]);
+				var oContext = { className: oClass.Class, classId: oClass.ClassInternalID };
+				var aRows = this._pivotData(aValues, aChars, mMeta, oCfg, oContext, mHeaders, [sNum]);
+
+				oUI.setProperty("/rows", aRows);
+				oUI.setProperty("/listRows", this._buildListRows(aRows, aChars, mMeta));
+				oUI.setProperty("/showTable", true);
+				oUI.setProperty("/showNoData", false);
+				this._updatePagination(0, oUI.getProperty("/pageSize") || 25, aRows.length);
+				this._applyResultFilters();
+			} catch (oError) {
+				this._showError(this._bundle().getText("dataLoadError", [this._extractError(oError)]));
+			} finally {
+				oUI.setProperty("/tableBusy", false);
+			}
+		},
+
+		/**
+		 * Search several objects at once. Resolves each object's class, builds a
+		 * union of characteristics across the involved classes as columns, and shows
+		 * all the objects together (paged).
+		 * @param {string[]} aNums object numbers
+		 */
+		_searchObjects: async function (aNums) {
+			var oUI = this._ui();
+			var that = this;
+			var sType = this.byId("classTypeSelect").getSelectedKey();
+			var oCfg = this._typeConfig(sType);
+
+			this._hideError();
+			if (!oCfg || !oCfg.enabled) {
+				this._showError(this._bundle().getText("typeNotSupported"));
+				return;
+			}
+
+			oUI.setProperty("/showEmptyState", false);
+			oUI.setProperty("/showNoData", false);
+			oUI.setProperty("/showTable", false);
+			oUI.setProperty("/tableBusy", true);
+
+			try {
+				// resolve class assignments for all requested objects
+				var sOr = aNums.map(function (n) {
+					return oCfg.objectKeyField + " eq '" + that._esc(n) + "'";
+				}).join(" or ");
+				var aAssign = await this._read(this._model(oCfg.modelName), oCfg.keyClassSet, {
+					"$filter": "(" + sOr + ")",
+					"$select": oCfg.objectKeyField + ",ClassInternalID,ClassType,Class",
+					"$top": MAX_LIST_ROWS
+				});
+
+				if (!aAssign.length) {
+					oUI.setProperty("/rows", []);
+					oUI.setProperty("/listRows", []);
+					oUI.setProperty("/showTable", false);
+					oUI.setProperty("/showNoData", true);
+					oUI.setProperty("/noDataTitle", this._bundle().getText("objectNotFound", [aNums.join(", ")]));
+					oUI.setProperty("/tableBusy", false);
+					return;
+				}
+
+				// first class per object + the distinct set of involved classes
+				var mClassByKey = {};
+				var oClassSeen = {};
+				var aClassIds = [];
+				aAssign.forEach(function (o) {
+					var k = o[oCfg.objectKeyField];
+					if (k && !mClassByKey[k]) {
+						mClassByKey[k] = { ClassInternalID: o.ClassInternalID, Class: o.Class };
+						if (!oClassSeen[o.ClassInternalID]) {
+							oClassSeen[o.ClassInternalID] = true;
+							aClassIds.push(o.ClassInternalID);
+						}
+					}
+				});
+
+				// union of characteristics across the involved classes
+				var oUnion = await this._fetchUnionCharacteristics(aClassIds);
+				this._buildColumns(oUnion.chars, oCfg);
+
+				var aResolved = Object.keys(mClassByKey);
+				this._pageCtx = {
+					oCfg: oCfg,
+					sClassId: null,
+					sClassType: sType,
+					className: aClassIds.length === 1 ? mClassByKey[aResolved[0]].Class : this._bundle().getText("multipleClasses"),
+					aChars: oUnion.chars,
+					mMeta: oUnion.meta,
+					classByKey: mClassByKey
+				};
+				this._filteredKeys = aResolved;
+				oUI.setProperty("/filterActive", false);
+				oUI.setProperty("/filterInfo", "");
+				oUI.setProperty("/tableBusy", false);
+
+				await this._loadPage(0);
+			} catch (oError) {
+				this._showError(this._bundle().getText("dataLoadError", [this._extractError(oError)]));
+				oUI.setProperty("/tableBusy", false);
+			}
+		},
+
+		/**
+		 * Fetch and union the characteristics of several classes (dedup by id,
+		 * preserving first-seen order), plus their merged metadata.
+		 * @param {string[]} aClassIds class internal ids
+		 * @returns {Promise<{chars: object[], meta: object}>}
+		 */
+		_fetchUnionCharacteristics: async function (aClassIds) {
+			var that = this;
+			var aPerClass = await Promise.all(aClassIds.map(function (sId) {
+				return that._fetchCharacteristics(sId);
+			}));
+			var aUnion = [];
+			var oSeen = {};
+			aPerClass.forEach(function (aChars) {
+				aChars.forEach(function (oChar) {
+					if (!oSeen[oChar.CharcInternalID]) {
+						oSeen[oChar.CharcInternalID] = true;
+						aUnion.push(oChar);
+					}
+				});
+			});
+			var mMeta = await this._fetchCharcMetadata(aUnion);
+			return { chars: aUnion, meta: mMeta };
+		},
+
+		/** Prompt the user to pick a class when an object is in several. */
+		_promptClassChoice: function (oCfg, sNum, aClasses) {
+			var that = this;
+			var oList = new List();
+			aClasses.forEach(function (oClass) {
+				oList.addItem(new StandardListItem({
+					title: oClass.Class || oClass.ClassInternalID,
+					description: that._bundle().getText("filterClassType") + " " + oClass.ClassType,
+					type: "Active",
+					press: function () {
+						oDialog.close();
+						that._loadSingleObject(oCfg, sNum, oClass);
+					}
+				}));
+			});
+			var oDialog = new Dialog({
+				title: that._bundle().getText("pickClassTitle", [sNum]),
+				contentWidth: "24rem",
+				content: [oList],
+				endButton: new Button({
+					text: that._bundle().getText("cancelButton"),
+					press: function () { oDialog.close(); }
+				}),
+				afterClose: function () { oDialog.destroy(); }
+			});
+			this.getView().addDependent(oDialog);
+			oDialog.open();
+		},
+
+		onPrevPage: function () {
+			if (this._currentPage > 0) {
+				this._loadPage(this._currentPage - 1);
+			}
+		},
+
+		onNextPage: function () {
+			this._loadPage((this._currentPage || 0) + 1);
+		},
+
+		onPageSizeChange: function (oEvent) {
+			var iSize = parseInt(oEvent.getParameter("selectedItem").getKey(), 10) || 25;
+			this._ui().setProperty("/pageSize", iSize);
+			// jump back to the first page at the new size
+			this._loadPage(0);
+		},
+
 		onExport: function () {
 			var oUI = this._ui();
 			var aColumns = oUI.getProperty("/columnConfig") || [];
@@ -218,6 +589,7 @@ sap.ui.define([
 			this._read(oModel, "/A_ClfnClassForKeyDate", {
 				"$filter": "ClassType eq '" + this._esc(sClassType) + "' and ClassStatus eq '" + CLASS_STATUS_RELEASED + "'",
 				"$select": "ClassInternalID,Class,ClassType,ClassStatus,ClassGroup",
+				"$top": MAX_LIST_ROWS,
 				"$orderby": "Class"
 			}).then(function (aResults) {
 				var aClasses = aResults.map(function (o) {
@@ -246,44 +618,270 @@ sap.ui.define([
 
 		_loadResults: async function (oCfg, sClassId, oClass) {
 			var oUI = this._ui();
+
+			// new class -> clear any object-number search
+			this._objectSearch = "";
+			var oObjSearch = this.byId("objectSearch");
+			if (oObjSearch) {
+				oObjSearch.setValue("");
+			}
+
 			oUI.setProperty("/showEmptyState", false);
 			oUI.setProperty("/showNoData", false);
 			oUI.setProperty("/showTable", false);
 			oUI.setProperty("/tableBusy", true);
 
 			try {
-				// 1. characteristic structure = the dynamic columns, in user sequence
-				var aChars = await this._fetchCharacteristics(sClassId);
+				// Rebuild columns + Adapt-Filters fields only when the class actually
+				// changes; on a re-Go for the same class we keep the user's filter input.
+				var sClassType = this.byId("classTypeSelect").getSelectedKey();
+				var bSameClass = this._pageCtx &&
+					this._pageCtx.sClassId === sClassId &&
+					this._pageCtx.sClassType === sClassType;
 
-				// 2. optional characteristic metadata for cell formatting
-				var mMeta = await this._fetchCharcMetadata(aChars);
-
-				// 3. the actual values for the chosen class
-				var aValues = await this._fetchValues(oCfg, oClass.Class);
-
-				// 4. pivot tall -> wide
-				var aRows = this._pivotData(aValues, aChars, mMeta, oCfg);
-
-				// 5. build the columns (fixed + one per characteristic)
-				this._buildColumns(aChars, oCfg);
-
-				oUI.setProperty("/rows", aRows);
-
-				if (aRows.length === 0) {
+				if (!bSameClass) {
 					oUI.setProperty("/showTable", false);
-					oUI.setProperty("/showNoData", true);
-					oUI.setProperty("/noDataTitle", this._bundle().getText("noDataTitle", [oClass.Class]));
-				} else {
-					oUI.setProperty("/showNoData", false);
-					oUI.setProperty("/showTable", true);
-					oUI.setProperty("/tableTitle", this._bundle().getText("tableTitle", [aRows.length]));
+					var aChars = await this._fetchCharacteristics(sClassId);
+					var mMeta = await this._fetchCharcMetadata(aChars);
+					this._buildColumns(aChars, oCfg);
+					this._pageCtx = {
+						oCfg: oCfg,
+						sClassId: sClassId,
+						sClassType: sClassType,
+						className: oClass.Class,
+						aChars: aChars,
+						mMeta: mMeta
+					};
 				}
+
+				// Apply whatever criteria the user set in Adapt Filters (server-side).
+				await this._applyCriteria(this._readCriteria());
 			} catch (oError) {
 				this._showError(this._bundle().getText("dataLoadError", [this._extractError(oError)]));
 				oUI.setProperty("/showEmptyState", true);
+				oUI.setProperty("/tableBusy", false);
+			}
+		},
+
+		/**
+		 * Read the active filter criteria from the Adapt-Filters value fields:
+		 * one condition per non-empty characteristic field, plus the object-number field.
+		 * @returns {{charcs: object[], object: string}}
+		 */
+		_readCriteria: function () {
+			var aCharcs = [];
+			var sObject = "";
+			var oFilterBar = this.byId("filterbar");
+			if (oFilterBar) {
+				oFilterBar.getFilterGroupItems().forEach(function (oItem) {
+					if (oItem.getGroupName() !== "values") {
+						return;
+					}
+					var oControl = oItem.getControl();
+					var sVal = (oControl && oControl.getValue) ? (oControl.getValue() || "").trim() : "";
+					if (!sVal) {
+						return;
+					}
+					var sProp = oItem.getName();
+					if (sProp.indexOf("C_") === 0) {
+						aCharcs.push({ charcId: sProp.substring(2), label: oItem.getLabel(), value: sVal });
+					} else if (sProp === "objNumber") {
+						sObject = sVal;
+					}
+				});
+			}
+			return { charcs: aCharcs, object: sObject };
+		},
+
+		/**
+		 * Apply the criteria server-side: resolve the matching object keys (or clear
+		 * the filter), then load page 1 of the (filtered) result.
+		 * @param {{charcs: object[], object: string}} oCriteria
+		 */
+		_applyCriteria: async function (oCriteria) {
+			var oUI = this._ui();
+			var ctx = this._pageCtx;
+			if (!ctx) {
+				return;
+			}
+			var bHasCriteria = (oCriteria.charcs.length > 0) || !!oCriteria.object;
+			oUI.setProperty("/tableBusy", true);
+
+			try {
+				if (!bHasCriteria) {
+					this._filteredKeys = null;
+					oUI.setProperty("/filterActive", false);
+					oUI.setProperty("/filterInfo", "");
+				} else {
+					this._filteredKeys = await this._resolveFilteredKeys(ctx, oCriteria);
+					var iConds = oCriteria.charcs.length + (oCriteria.object ? 1 : 0);
+					oUI.setProperty("/filterActive", true);
+					oUI.setProperty("/filterInfo", this._bundle().getText("filterActiveInfo", [this._filteredKeys.length, iConds]));
+				}
+				await this._loadPage(0);
+			} catch (oError) {
+				this._showError(this._bundle().getText("dataLoadError", [this._extractError(oError)]));
+				oUI.setProperty("/tableBusy", false);
+			}
+		},
+
+		/**
+		 * Resolve the object keys (within the class) that satisfy ALL criteria, by
+		 * intersecting per-condition matches found server-side. Each characteristic
+		 * condition is a cheap key-field ($filter on CharcInternalID) lookup.
+		 * @returns {Promise<string[]>} matching object keys, sorted
+		 */
+		_resolveFilteredKeys: async function (ctx, oCriteria) {
+			var that = this;
+			var oCfg = ctx.oCfg;
+			var sKeyField = oCfg.objectKeyField;
+			var oModel = this._model(oCfg.modelName);
+			var aSets = [];
+
+			// one query per characteristic condition -> set of matching object keys
+			var aCharcSets = await Promise.all(oCriteria.charcs.map(function (oCond) {
+				return that._read(oModel, oCfg.valueSet, {
+					"$filter": oCfg.charcIdField + " eq '" + that._esc(oCond.charcId) +
+						"' and substringof('" + that._esc(oCond.value) + "',CharcValue)",
+					"$select": sKeyField + ",ClassInternalID",
+					"$top": MAX_VALUE_ROWS
+				}).then(function (aRows) {
+					var oSet = {};
+					aRows.forEach(function (r) {
+						if (r.ClassInternalID === ctx.sClassId && r[sKeyField]) {
+							oSet[r[sKeyField]] = true;
+						}
+					});
+					return oSet;
+				});
+			}));
+			aCharcSets.forEach(function (oSet) { aSets.push(oSet); });
+
+			// object-number condition (from the class-assignment entity)
+			if (oCriteria.object) {
+				var aKeyRows = await this._read(oModel, oCfg.keyClassSet, {
+					"$filter": "ClassInternalID eq '" + this._esc(ctx.sClassId) + "' and ClassType eq '" +
+						this._esc(ctx.sClassType) + "' and substringof('" + this._esc(oCriteria.object) + "'," + sKeyField + ")",
+					"$select": sKeyField,
+					"$top": MAX_LIST_ROWS
+				});
+				var oObjSet = {};
+				aKeyRows.forEach(function (r) { if (r[sKeyField]) { oObjSet[r[sKeyField]] = true; } });
+				aSets.push(oObjSet);
+			}
+
+			if (!aSets.length) {
+				return [];
+			}
+
+			// intersect all sets
+			var aKeys = Object.keys(aSets[0]).filter(function (k) {
+				return aSets.every(function (oSet) { return oSet[k]; });
+			});
+			aKeys.sort();
+			return aKeys;
+		},
+
+		/** Clear the whole-class filter criteria and reload the unfiltered class. */
+		onClearFilters: function () {
+			var oFilterBar = this.byId("filterbar");
+			if (oFilterBar) {
+				oFilterBar.getFilterGroupItems().forEach(function (oItem) {
+					if (oItem.getGroupName() === "values") {
+						var oControl = oItem.getControl();
+						if (oControl && oControl.setValue) {
+							oControl.setValue("");
+						}
+					}
+				});
+			}
+			this._filteredKeys = null;
+			this._ui().setProperty("/filterActive", false);
+			this._ui().setProperty("/filterInfo", "");
+			if (this._pageCtx) {
+				this._loadPage(0);
+			}
+		},
+
+		/**
+		 * Load one page of objects (server paging): fetch the page's object keys from
+		 * the class-assignment entity, then only those objects' values + headers.
+		 * @param {int} iPageIndex zero-based page index
+		 */
+		_loadPage: async function (iPageIndex) {
+			var ctx = this._pageCtx;
+			if (!ctx) {
+				return;
+			}
+			var oUI = this._ui();
+			var iPageSize = oUI.getProperty("/pageSize") || 25;
+			oUI.setProperty("/tableBusy", true);
+			oUI.setProperty("/showEmptyState", false);
+
+			try {
+				// 1. page of object keys (+ total count)
+				var aKeys, iTotal;
+				if (this._filteredKeys) {
+					// filtered: page the pre-resolved matching keys client-side
+					iTotal = this._filteredKeys.length;
+					aKeys = this._filteredKeys.slice(iPageIndex * iPageSize, (iPageIndex * iPageSize) + iPageSize);
+				} else {
+					// unfiltered: server paging via the class-assignment entity
+					var oPage = await this._fetchObjectKeyPage(ctx, iPageIndex * iPageSize, iPageSize);
+					aKeys = oPage.keys;
+					iTotal = oPage.count;
+				}
+
+				if (!aKeys.length) {
+					oUI.setProperty("/rows", []);
+					oUI.setProperty("/listRows", []);
+					oUI.setProperty("/showTable", false);
+					oUI.setProperty("/showNoData", true);
+					oUI.setProperty("/noDataTitle", this._bundle().getText(this._filteredKeys ? "noMatchTitle" : "noDataTitle", [ctx.className]));
+					this._updatePagination(0, iPageSize, iTotal || 0);
+					return;
+				}
+
+				// 2. values for just these objects (cheap key filter), kept to their class
+				var aValues = await this._fetchValuesForKeys(ctx.oCfg, aKeys, ctx.sClassId, ctx.classByKey);
+
+				// 3. headers for these objects
+				var mHeaders = await this._fetchHeaders(ctx.oCfg, aKeys);
+
+				// 4. pivot — seed with the page keys so every object shows a row even
+				//    if it has no display-relevant values
+				var oContext = { className: ctx.className, classId: ctx.sClassId, classByKey: ctx.classByKey };
+				var aRows = this._pivotData(aValues, ctx.aChars, ctx.mMeta, ctx.oCfg, oContext, mHeaders, aKeys);
+
+				oUI.setProperty("/rows", aRows);
+				oUI.setProperty("/listRows", this._buildListRows(aRows, ctx.aChars, ctx.mMeta));
+				oUI.setProperty("/showNoData", false);
+				oUI.setProperty("/showTable", true);
+				this._updatePagination(iPageIndex, iPageSize, iTotal);
+
+				// re-apply any active page-local filters/search to the new page
+				this._applyResultFilters();
+			} catch (oError) {
+				this._showError(this._bundle().getText("dataLoadError", [this._extractError(oError)]));
 			} finally {
 				oUI.setProperty("/tableBusy", false);
 			}
+		},
+
+		/** Update pagination state + labels for the given page. */
+		_updatePagination: function (iPageIndex, iPageSize, iTotal) {
+			var oUI = this._ui();
+			var iPages = Math.max(1, Math.ceil(iTotal / iPageSize));
+			var iCurrent = iPageIndex + 1;
+			var iFrom = iTotal === 0 ? 0 : (iPageIndex * iPageSize) + 1;
+			var iTo = Math.min(iTotal, (iPageIndex + 1) * iPageSize);
+
+			this._currentPage = iPageIndex;
+			this._totalObjects = iTotal;
+			oUI.setProperty("/tableTitle", this._bundle().getText("tableTitle", [iTotal]));
+			oUI.setProperty("/pageInfo", this._bundle().getText("pageInfo", [iCurrent, iPages, iFrom, iTo]));
+			oUI.setProperty("/pagePrevEnabled", iPageIndex > 0);
+			oUI.setProperty("/pageNextEnabled", iCurrent < iPages);
 		},
 
 		/**
@@ -295,16 +893,23 @@ sap.ui.define([
 			var oModel = this._model("class");
 			var sPath = "/A_ClfnClassForKeyDate('" + this._esc(sClassId) + "')/to_ClassCharacteristic";
 
+			// Fetch all of the class's characteristics (the CharcIsDisplayRelevant flag
+			// is often not maintained, so we can't hard-filter on it server-side).
 			var aResults = await this._read(oModel, sPath, {
-				"$filter": "CharcIsDisplayRelevant eq 'X'",
 				"$orderby": "CharcPositionNumber",
-				"$select": "CharcInternalID,Characteristic,CharcPositionNumber"
+				"$select": "CharcInternalID,Characteristic,CharcPositionNumber,CharcIsDisplayRelevant",
+				"$top": MAX_LIST_ROWS
 			});
 
 			// Guard the ordering client-side too (orderby is also applied server-side).
-			return aResults.slice().sort(function (a, b) {
+			var aSorted = aResults.slice().sort(function (a, b) {
 				return (parseInt(a.CharcPositionNumber, 10) || 0) - (parseInt(b.CharcPositionNumber, 10) || 0);
 			});
+
+			// Prefer display-relevant characteristics, but fall back to all of them
+			// when the flag isn't set (otherwise there would be no characteristic columns).
+			var aDisplay = aSorted.filter(function (c) { return c.CharcIsDisplayRelevant === "X"; });
+			return aDisplay.length ? aDisplay : aSorted;
 		},
 
 		/**
@@ -334,7 +939,8 @@ sap.ui.define([
 					}).join(" or ");
 					return that._read(oModel, "/A_ClfnCharacteristicForKeyDate", {
 						"$filter": sFilter,
-						"$select": "CharcInternalID,CharcDataType,CharcDecimals,CharcValueUnit,Currency"
+						"$select": "CharcInternalID,CharcDataType,CharcDecimals,CharcValueUnit,Currency,CharcGroup,CharcGroupName",
+						"$top": MAX_LIST_ROWS
 					});
 				}));
 
@@ -350,53 +956,144 @@ sap.ui.define([
 		},
 
 		/**
-		 * API 3/4 — value rows for one class, with the object header expanded.
-		 * @param {object} oCfg the per-type config
-		 * @param {string} sClassName the readable Class code
-		 * @returns {Promise<object[]>} value rows
+		 * One page of object keys for the class, plus the total count, from the
+		 * class-assignment entity (one cheap row per object in the class).
+		 * @param {object} ctx the page context (oCfg, sClassId, sClassType)
+		 * @param {int} iSkip rows to skip
+		 * @param {int} iTop page size
+		 * @returns {Promise<{keys: string[], count: int}>}
 		 */
-		_fetchValues: function (oCfg, sClassName) {
+		_fetchObjectKeyPage: async function (ctx, iSkip, iTop) {
+			var oCfg = ctx.oCfg;
 			var oModel = this._model(oCfg.modelName);
-			return this._read(oModel, oCfg.valueSet, {
-				"$filter": "Class eq '" + this._esc(sClassName) + "'",
-				"$top": MAX_VALUE_ROWS,
-				"$expand": oCfg.expandNav
+			var sKeyField = oCfg.objectKeyField;
+			var oData = await this._readWithCount(oModel, oCfg.keyClassSet, {
+				"$filter": "ClassInternalID eq '" + this._esc(ctx.sClassId) + "' and ClassType eq '" + this._esc(ctx.sClassType) + "'",
+				"$select": sKeyField,
+				"$orderby": sKeyField,
+				"$skip": iSkip,
+				"$top": iTop,
+				"$inlinecount": "allpages"
 			});
+			var aKeys = oData.results.map(function (o) { return o[sKeyField]; }).filter(Boolean);
+			return { keys: aKeys, count: oData.count };
+		},
+
+		/**
+		 * Value rows for a specific set of objects. Filters on the object key (cheap —
+		 * avoids the expensive ClassInternalID filter), then narrows to the selected
+		 * class client-side (an object's values span all its classes).
+		 * @param {object} oCfg the per-type config
+		 * @param {string[]} aKeys object numbers on the current page
+		 * @param {string} sClassId the selected ClassInternalID
+		 * @returns {Promise<object[]>} value rows for this class
+		 */
+		_fetchValuesForKeys: async function (oCfg, aKeys, sClassId, mClassByKey) {
+			var oModel = this._model(oCfg.modelName);
+			var sKeyField = oCfg.objectKeyField;
+			var that = this;
+			var sOr = aKeys.map(function (k) {
+				return sKeyField + " eq '" + that._esc(k) + "'";
+			}).join(" or ");
+			var aRows = await this._read(oModel, oCfg.valueSet, {
+				"$filter": "(" + sOr + ")",
+				"$select": oCfg.valueSelect,
+				"$top": MAX_VALUE_ROWS
+			});
+			// keep each object's values for the class we resolved for it: a per-object
+			// map for multi-object/multi-class search, else a single class id.
+			if (mClassByKey) {
+				return aRows.filter(function (r) {
+					var oC = mClassByKey[r[sKeyField]];
+					return oC && r.ClassInternalID === oC.ClassInternalID;
+				});
+			}
+			return aRows.filter(function (r) { return r.ClassInternalID === sClassId; });
 		},
 
 		/* =========================================================== */
 		/* pivot: tall (object,charc,value) rows -> wide object rows    */
 		/* =========================================================== */
 
-		_pivotData: function (aValues, aChars, mMeta, oCfg) {
+		_fetchHeaders: async function (oCfg, aKeys) {
+			var mHeaders = {};
+			var sKeyField = oCfg.objectKeyField;
+			var that = this;
+
+			if (!aKeys || !aKeys.length) {
+				return mHeaders;
+			}
+
+			var oModel = this._model(oCfg.modelName);
+			var aChunks = this._chunk(aKeys, 30);
+
+			var aResponses = await Promise.all(aChunks.map(function (aChunk) {
+				var sFilter = aChunk.map(function (k) {
+					return sKeyField + " eq '" + that._esc(k) + "'";
+				}).join(" or ");
+				return that._read(oModel, oCfg.headerSet, {
+					"$filter": sFilter,
+					"$select": oCfg.headerSelect,
+					"$top": MAX_LIST_ROWS
+				});
+			}));
+
+			aResponses.forEach(function (aRows) {
+				aRows.forEach(function (oRow) {
+					var k = oRow[sKeyField];
+					// for time-dependent headers, keep the latest validity record
+					var oPrev = mHeaders[k];
+					if (!oPrev || !oCfg.headerHasValidity ||
+						that._epoch(oRow.ValidityEndDate) >= that._epoch(oPrev.ValidityEndDate)) {
+						mHeaders[k] = oRow;
+					}
+				});
+			});
+
+			return mHeaders;
+		},
+
+		_pivotData: function (aValues, aChars, mMeta, oCfg, oContext, mHeaders, aSeedKeys) {
 			var that = this;
 			var sKeyField = oCfg.objectKeyField;
+			var sCharcIdField = oCfg.charcIdField;
 			var oGroups = {};
 			var aOrder = [];
 
-			aValues.forEach(function (oRow) {
-				var sKey = oRow[sKeyField];
-				if (!sKey) {
-					return;
-				}
-
+			function ensureGroup(sKey, oRow) {
 				var oGroup = oGroups[sKey];
 				if (!oGroup) {
-					var oHeader = oRow[oCfg.expandNav] || {};
-					oGroup = { __key: sKey, __header: oHeader, __anchor: oRow, __cells: {} };
+					var oHeader = (mHeaders && mHeaders[sKey]) || {};
+					oGroup = { __key: sKey, __cells: {} };
 
-					// fixed columns
+					// fixed columns (oRow may be null for a seeded object with no values)
 					oCfg.fixedColumns.forEach(function (oFixed) {
-						var vValue = oFixed.get(sKey, oHeader, oRow);
+						var vValue = oFixed.get(sKey, oHeader, oRow || {}, oContext);
 						oGroup[oFixed.key] = (vValue === undefined || vValue === null) ? "" : String(vValue);
 					});
 
 					oGroups[sKey] = oGroup;
 					aOrder.push(sKey);
 				}
+				return oGroup;
+			}
+
+			// seed a row for every object on the page, in page (key) order
+			(aSeedKeys || []).forEach(function (sKey) {
+				if (sKey) {
+					ensureGroup(sKey, null);
+				}
+			});
+
+			aValues.forEach(function (oRow) {
+				var sKey = oRow[sKeyField];
+				if (!sKey) {
+					return;
+				}
+				var oGroup = ensureGroup(sKey, oRow);
 
 				// characteristic cell — accumulate for multi-value handling
-				var sCharcId = oRow.CharcInternalID;
+				var sCharcId = oRow[sCharcIdField];
 				var aBucket = oGroup.__cells[sCharcId];
 				if (!aBucket) {
 					aBucket = [];
@@ -466,19 +1163,91 @@ sap.ui.define([
 		/* dynamic column construction                                 */
 		/* =========================================================== */
 
+		/**
+		 * Build the grouped card structure for the list view from the flat pivoted
+		 * rows. Characteristics are grouped by their characteristic group.
+		 * @param {object[]} aRows pivoted rows
+		 * @param {object[]} aChars ordered characteristics
+		 * @param {object} mMeta characteristic metadata (group, unit)
+		 * @returns {object[]} list-view rows
+		 */
+		_buildListRows: function (aRows, aChars, mMeta) {
+			var oCfg = this._pageCtx ? this._pageCtx.oCfg : null;
+			var aFixed = oCfg ? oCfg.fixedColumns : [];
+			var sDefaultGroup = this._bundle().getText("listDefaultGroup");
+			var sPopulated = this._bundle().getText("listPopulated");
+
+			return aRows.map(function (oRow) {
+				var oOut = {
+					objNumber: aFixed[0] ? oRow[aFixed[0].key] : "",
+					objDesc: aFixed[1] ? oRow[aFixed[1].key] : "",
+					objClass: aFixed[2] ? oRow[aFixed[2].key] : "",
+					masterFields: aFixed.slice(3).map(function (f) {
+						return { label: f.label, value: oRow[f.key] || "-" };
+					}),
+					groups: []
+				};
+
+				var oGroupMap = {};
+				var aGroupOrder = [];
+				aChars.forEach(function (oChar) {
+					var oM = mMeta[oChar.CharcInternalID] || {};
+					var sGroup = oM.CharcGroupName || oM.CharcGroup || sDefaultGroup;
+					var oGroup = oGroupMap[sGroup];
+					if (!oGroup) {
+						oGroup = { name: sGroup, charcs: [], populated: 0 };
+						oGroupMap[sGroup] = oGroup;
+						aGroupOrder.push(sGroup);
+					}
+					var sVal = oRow["C_" + oChar.CharcInternalID] || "";
+					var bPop = sVal !== "";
+					oGroup.charcs.push({
+						label: oChar.Characteristic,
+						value: bPop ? sVal : "-",
+						unit: bPop ? (oM.CharcValueUnit || "") : "",
+						populated: bPop
+					});
+					if (bPop) {
+						oGroup.populated++;
+					}
+				});
+
+				oOut.groups = aGroupOrder.map(function (s) {
+					var oGroup = oGroupMap[s];
+					oGroup.total = oGroup.charcs.length;
+					oGroup.countText = oGroup.populated + "/" + oGroup.total + " " + sPopulated;
+					return oGroup;
+				});
+				return oOut;
+			});
+		},
+
 		_buildColumns: function (aChars, oCfg) {
 			var oTable = this.byId("resultTable");
 			oTable.removeAllColumns();
 
+			// fresh result-filter state for the new dataset
+			this._resultFilters = {};
+			this._globalSearch = "";
+			var oSearch = this.byId("resultSearch");
+			if (oSearch) {
+				oSearch.setValue("");
+			}
+			var oOldBinding = oTable.getBinding("rows");
+			if (oOldBinding) {
+				oOldBinding.filter([]);
+			}
+
 			var aColumnConfig = [];
 
-			// fixed columns (frozen, leftmost)
+			// fixed columns (frozen, leftmost). filterProperty enables the in-grid filter.
 			oCfg.fixedColumns.forEach(function (oFixed) {
 				oTable.addColumn(new TableColumn({
 					label: new Label({ text: oFixed.label }),
 					template: new Text({ text: "{ui>" + oFixed.key + "}", wrapping: false }),
 					width: oFixed.width,
 					sortProperty: oFixed.key,
+					filterProperty: oFixed.key,
 					autoResizable: true
 				}));
 				aColumnConfig.push({ label: oFixed.label, property: oFixed.key });
@@ -495,12 +1264,136 @@ sap.ui.define([
 					template: new Text({ text: "{ui>" + sProp + "}", wrapping: false }),
 					width: "10rem",
 					sortProperty: sProp,
+					filterProperty: sProp,
 					autoResizable: true
 				}));
 				aColumnConfig.push({ label: oChar.Characteristic, property: sProp });
 			});
 
 			this._ui().setProperty("/columnConfig", aColumnConfig);
+
+			// (re)build the dedicated value-filter fields in the filter bar
+			this._buildValueFilters(aColumnConfig);
+		},
+
+		/**
+		 * Rebuild the whole-class filter fields in the filter bar — one per
+		 * characteristic plus the object number. They live in the "Adapt Filters"
+		 * dialog (visibleInFilterBar=false); the values are read on Go and applied
+		 * server-side across the whole class (see _readCriteria/_applyCriteria).
+		 * @param {object[]} aColumnConfig [{label, property}]
+		 */
+		_buildValueFilters: function (aColumnConfig) {
+			var oFilterBar = this.byId("filterbar");
+			if (!oFilterBar) {
+				return;
+			}
+
+			// remove previously generated value-filter items
+			oFilterBar.getFilterGroupItems()
+				.filter(function (oItem) { return oItem.getGroupName() === "values"; })
+				.forEach(function (oItem) {
+					oFilterBar.removeFilterGroupItem(oItem);
+					oItem.destroy();
+				});
+
+			var sGroupTitle = this._bundle().getText("valueFilterGroupTitle");
+
+			aColumnConfig.forEach(function (oCol) {
+				// only object number + characteristics are server-filterable
+				if (oCol.property !== "objNumber" && oCol.property.indexOf("C_") !== 0) {
+					return;
+				}
+				var oInput = new Input({ value: "", placeholder: oCol.label });
+				oInput.data("prop", oCol.property);
+
+				oFilterBar.addFilterGroupItem(new FilterGroupItem({
+					groupName: "values",
+					groupTitle: sGroupTitle,
+					name: oCol.property,
+					label: oCol.label,
+					visibleInFilterBar: false,
+					control: oInput
+				}));
+			});
+		},
+
+		/* =========================================================== */
+		/* result filtering (in-memory)                                */
+		/* =========================================================== */
+
+		/**
+		 * Record a single property's filter value and re-apply the combined filter.
+		 * @param {string} sProp column property
+		 * @param {string} sValue filter text ("" clears it)
+		 */
+		_setResultFilter: function (sProp, sValue) {
+			if (sValue && sValue.trim()) {
+				this._resultFilters[sProp] = sValue.trim();
+			} else {
+				delete this._resultFilters[sProp];
+			}
+			this._applyResultFilters();
+		},
+
+		/**
+		 * Rebuild the binding filter from every per-column filter (AND) plus the
+		 * global search (OR across all columns), then refresh the count.
+		 */
+		_applyResultFilters: function () {
+			var oTable = this.byId("resultTable");
+			var oBinding = oTable.getBinding("rows");
+			if (!oBinding) {
+				return;
+			}
+
+			var aFilters = Object.keys(this._resultFilters).map(function (sProp) {
+				return new Filter(sProp, FilterOperator.Contains, this._resultFilters[sProp]);
+			}, this);
+
+			if (this._globalSearch) {
+				var aCols = this._ui().getProperty("/columnConfig") || [];
+				var aOr = aCols.map(function (oCol) {
+					return new Filter(oCol.property, FilterOperator.Contains, this._globalSearch);
+				}, this);
+				if (aOr.length) {
+					aFilters.push(new Filter({ filters: aOr, and: false }));
+				}
+			}
+
+			oBinding.filter(aFilters.length ? new Filter({ filters: aFilters, and: true }) : []);
+
+			// Filters are page-local (server paging). Paging owns the main title;
+			// here we only annotate the page label with the on-page match count.
+			if (aFilters.length) {
+				var iShown = oBinding.getLength();
+				var iPageRows = (this._ui().getProperty("/rows") || []).length;
+				this._ui().setProperty("/pageInfo", this._bundle().getText("pageInfoFiltered", [iShown, iPageRows]));
+			} else if (this._currentPage !== undefined) {
+				// no filter -> restore the normal page label
+				this._updatePagination(this._currentPage, this._ui().getProperty("/pageSize") || 25, this._totalObjects || 0);
+			}
+		},
+
+		/**
+		 * Push a value into the dedicated filter-bar field for a property so it
+		 * stays consistent when the user filters via the column menu instead.
+		 * @param {string} sProp column property
+		 * @param {string} sValue filter text
+		 */
+		_syncValueFilterField: function (sProp, sValue) {
+			var oFilterBar = this.byId("filterbar");
+			if (!oFilterBar) {
+				return;
+			}
+			oFilterBar.getFilterGroupItems().forEach(function (oItem) {
+				if (oItem.getGroupName() === "values" && oItem.getName() === sProp) {
+					var oControl = oItem.getControl();
+					if (oControl && oControl.setValue) {
+						oControl.setValue(sValue || "");
+					}
+				}
+			});
 		},
 
 		/* =========================================================== */
@@ -535,6 +1428,20 @@ sap.ui.define([
 		/* =========================================================== */
 		/* small utilities                                             */
 		/* =========================================================== */
+
+		_readWithCount: function (oModel, sPath, mUrlParameters) {
+			return new Promise(function (resolve, reject) {
+				oModel.read(sPath, {
+					urlParameters: mUrlParameters,
+					success: function (oData) {
+						var aResults = (oData && Array.isArray(oData.results)) ? oData.results : (oData ? [oData] : []);
+						var iCount = (oData && oData.__count !== undefined) ? parseInt(oData.__count, 10) : aResults.length;
+						resolve({ results: aResults, count: isNaN(iCount) ? aResults.length : iCount });
+					},
+					error: reject
+				});
+			});
+		},
 
 		_ui: function () {
 			return this.getView().getModel("ui");
@@ -578,6 +1485,17 @@ sap.ui.define([
 			return s.replace(/0+$/, "").replace(/\.$/, "");
 		},
 
+		_epoch: function (v) {
+			if (!this._has(v)) {
+				return 0;
+			}
+			if (v instanceof Date) {
+				return v.getTime();
+			}
+			var m = /\/Date\((-?\d+)/.exec(String(v));
+			return m ? parseInt(m[1], 10) : 0;
+		},
+
 		_formatDate: function (v) {
 			if (!this._has(v)) {
 				return "";
@@ -604,11 +1522,36 @@ sap.ui.define([
 		_resetResults: function () {
 			var oUI = this._ui();
 			oUI.setProperty("/rows", []);
+			oUI.setProperty("/listRows", []);
 			oUI.setProperty("/columnConfig", []);
 			oUI.setProperty("/showTable", false);
 			oUI.setProperty("/showNoData", false);
 			oUI.setProperty("/showEmptyState", true);
 			oUI.setProperty("/tableTitle", "");
+			oUI.setProperty("/pageInfo", "");
+			oUI.setProperty("/pagePrevEnabled", false);
+			oUI.setProperty("/pageNextEnabled", false);
+			this._pageCtx = null;
+			this._currentPage = 0;
+			this._totalObjects = 0;
+			this._objectSearch = "";
+			this._filteredKeys = null;
+			oUI.setProperty("/filterActive", false);
+			oUI.setProperty("/filterInfo", "");
+			var oObjSearch = this.byId("objectSearch");
+			if (oObjSearch) {
+				oObjSearch.setValue("");
+			}
+
+			// drop result-filter state and the dedicated value-filter fields
+			this._resultFilters = {};
+			this._globalSearch = "";
+			var oSearch = this.byId("resultSearch");
+			if (oSearch) {
+				oSearch.setValue("");
+			}
+			this._buildValueFilters([]);
+
 			var oTable = this.byId("resultTable");
 			if (oTable) {
 				oTable.removeAllColumns();

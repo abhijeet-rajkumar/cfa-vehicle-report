@@ -19,6 +19,21 @@
 				<f:expandedContent>
 					<Label text="{i18n>appSubtitle}" />
 				</f:expandedContent>
+				<f:content>
+					<SearchField
+						id="objectSearch"
+						placeholder="{i18n>objectSearchPlaceholder}"
+						search="onObjectSearch"
+						width="22rem" />
+				</f:content>
+				<f:actions>
+					<SegmentedButton selectedKey="{ui>/viewMode}">
+						<items>
+							<SegmentedButtonItem key="table" icon="sap-icon://table-view" tooltip="{i18n>tableView}" />
+							<SegmentedButtonItem key="list" icon="sap-icon://list" tooltip="{i18n>listView}" />
+						</items>
+					</SegmentedButton>
+				</f:actions>
 			</f:DynamicPageTitle>
 		</f:title>
 
@@ -28,7 +43,7 @@
 				<fb:FilterBar
 					id="filterbar"
 					useToolbar="false"
-					showFilterConfiguration="false"
+					showFilterConfiguration="true"
 					showRestoreButton="false"
 					showClearButton="true"
 					showGoOnFB="true"
@@ -98,9 +113,36 @@
 					title="{ui>/noDataTitle}"
 					description="{i18n>noDataDesc}" />
 
+				<!-- Whole-class filter info bar -->
+				<Toolbar id="filterInfoBar" design="Info" visible="{ui>/filterActive}" class="sapUiSmallMarginBottom">
+					<core:Icon src="sap-icon://filter" class="sapUiTinyMarginEnd" />
+					<Text text="{ui>/filterInfo}" />
+					<ToolbarSpacer />
+					<Button type="Transparent" icon="sap-icon://clear-filter" text="{i18n>clearFilters}" press="onClearFilters" />
+				</Toolbar>
+
+				<!-- Shared toolbar for both views -->
+				<OverflowToolbar visible="{ui>/showTable}">
+					<Title id="tableTitle" text="{ui>/tableTitle}" level="H3" />
+					<Button id="prevPage" icon="sap-icon://navigation-left-arrow" tooltip="{i18n>prevPageButton}" enabled="{ui>/pagePrevEnabled}" press="onPrevPage" />
+					<Text id="pageInfo" text="{ui>/pageInfo}" />
+					<Button id="nextPage" icon="sap-icon://navigation-right-arrow" tooltip="{i18n>nextPageButton}" enabled="{ui>/pageNextEnabled}" press="onNextPage" />
+					<Select id="pageSizeSelect" selectedKey="{ui>/pageSize}" forceSelection="true" autoAdjustWidth="true" tooltip="{i18n>rowsPerPage}" change="onPageSizeChange">
+						<core:Item key="25" text="25" />
+						<core:Item key="50" text="50" />
+						<core:Item key="100" text="100" />
+					</Select>
+					<ToolbarSpacer />
+					<Switch id="showEmptySwitch" state="{ui>/showEmpty}" visible="{= ${ui>/viewMode} === 'list' }" />
+					<Label text="{i18n>showEmpty}" visible="{= ${ui>/viewMode} === 'list' }" />
+					<SearchField id="resultSearch" width="18rem" placeholder="{i18n>resultSearchPlaceholder}" search="onResultSearch" liveChange="onResultSearch" visible="{= ${ui>/viewMode} === 'table' }" />
+					<Button id="exportBtn" icon="sap-icon://excel-attachment" text="{i18n>exportButton}" tooltip="{i18n>exportButton}" press="onExport" />
+				</OverflowToolbar>
+
+				<!-- TABLE VIEW -->
 				<table:Table
 					id="resultTable"
-					visible="{ui>/showTable}"
+					visible="{= ${ui>/showTable} &amp;&amp; ${ui>/viewMode} === 'table' }"
 					rows="{ path: 'ui>/rows', templateShareable: false }"
 					selectionMode="None"
 					selectionBehavior="RowOnly"
@@ -113,25 +155,66 @@
 					minAutoRowCount="5"
 					busy="{ui>/tableBusy}"
 					busyIndicatorDelay="0"
-					sort="onColumnSort">
+					sort="onColumnSort"
+					filter="onColumnFilter">
 					<table:layoutData>
 						<FlexItemData growFactor="1" />
 					</table:layoutData>
-					<table:extension>
-						<OverflowToolbar>
-							<Title id="tableTitle" text="{ui>/tableTitle}" level="H3" />
-							<ToolbarSpacer />
-							<Button
-								id="exportBtn"
-								icon="sap-icon://excel-attachment"
-								text="{i18n>exportButton}"
-								tooltip="{i18n>exportButton}"
-								enabled="{ui>/showTable}"
-								press="onExport" />
-						</OverflowToolbar>
-					</table:extension>
 					<!-- Columns are generated dynamically in Main.controller.js::_buildColumns -->
 				</table:Table>
+
+				<!-- LIST / CARD VIEW -->
+				<ScrollContainer
+					id="listView"
+					visible="{= ${ui>/showTable} &amp;&amp; ${ui>/viewMode} === 'list' }"
+					vertical="true"
+					horizontal="false"
+					height="100%"
+					width="100%"
+					busy="{ui>/tableBusy}"
+					busyIndicatorDelay="0">
+					<layoutData>
+						<FlexItemData growFactor="1" />
+					</layoutData>
+					<VBox items="{ path: 'ui>/listRows', templateShareable: false }">
+						<Panel class="cfaCard sapUiSmallMarginTop sapUiSmallMarginBegin sapUiSmallMarginEnd" backgroundDesign="Solid">
+							<HBox wrap="Wrap" alignItems="Start">
+								<!-- left: object master -->
+								<VBox width="15rem" class="sapUiSmallMargin cfaCardMaster">
+									<Label text="{i18n>colEquipment}" class="cfaMutedLabel" />
+									<Title text="{ui>objNumber}" level="H3" wrapping="true" />
+									<Text text="{ui>objDesc}" class="sapUiTinyMarginTop" />
+									<ObjectStatus text="{ui>objClass}" icon="sap-icon://tag" state="Information" inverted="true" class="sapUiTinyMarginTop" />
+									<VBox items="{ path: 'ui>masterFields', templateShareable: false }">
+										<VBox class="sapUiTinyMarginTop">
+											<Label text="{ui>label}" class="cfaMutedLabel" />
+											<Text text="{ui>value}" />
+										</VBox>
+									</VBox>
+								</VBox>
+								<!-- right: grouped characteristics -->
+								<VBox class="sapUiSmallMargin cfaCardGroups" items="{ path: 'ui>groups', templateShareable: false }">
+									<VBox class="sapUiSmallMarginBottom" visible="{= ${ui>populated} &gt; 0 || ${ui>/showEmpty} }">
+										<HBox alignItems="Center" class="cfaGroupHeader">
+											<core:Icon src="sap-icon://circle-task-2" size="0.55rem" color="#0a6ed1" class="sapUiTinyMarginEnd" />
+											<Title text="{ui>name}" level="H6" />
+											<Text text="{ui>countText}" class="cfaMutedLabel sapUiTinyMarginBegin" />
+										</HBox>
+										<HBox wrap="Wrap" items="{ path: 'ui>charcs', templateShareable: false }">
+											<VBox width="13rem" class="sapUiTinyMarginTop sapUiMediumMarginEnd" visible="{= ${ui>populated} || ${ui>/showEmpty} }">
+												<Label text="{ui>label}" class="cfaMutedLabel" />
+												<HBox alignItems="End">
+													<Text text="{ui>value}" />
+													<Text text="{ui>unit}" class="cfaMutedLabel sapUiTinyMarginBegin" visible="{= !!${ui>unit} }" />
+												</HBox>
+											</VBox>
+										</HBox>
+									</VBox>
+								</VBox>
+							</HBox>
+						</Panel>
+					</VBox>
+				</ScrollContainer>
 
 			</FlexBox>
 		</f:content>

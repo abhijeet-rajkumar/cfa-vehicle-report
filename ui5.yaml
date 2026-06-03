@@ -27,4 +27,4 @@ server:
             - /resources
             - /test-resources
           url: https://ui5.sap.com
-          version: 1.120.20
+          version: "1.120"

@@ -8,11 +8,12 @@
     <!--
       UI5 is bootstrapped from the public CDN so the app runs both under the
       local UI5 tooling server and under the BTP approuter without needing a
-      separate UI5 resources destination. Pin the version for reproducibility.
+      separate UI5 resources destination. Use the floating 1.120 LTS line so the
+      URL stays resolvable when SAP rotates patch versions off the CDN.
     -->
     <script
       id="sap-ui-bootstrap"
-      src="https://ui5.sap.com/1.120.20/resources/sap-ui-core.js"
+      src="https://ui5.sap.com/1.120/resources/sap-ui-core.js"
       data-sap-ui-theme="sap_horizon"
       data-sap-ui-resourceroots='{ "com.cfa.charlist": "./" }'
       data-sap-ui-oninit="module:sap/ui/core/ComponentSupport"

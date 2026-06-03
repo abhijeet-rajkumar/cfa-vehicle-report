@@ -3,7 +3,11 @@
   "sap.app": {
     "id": "com.cfa.charlist",
     "type": "application",
-    "i18n": "i18n/i18n.properties",
+    "i18n": {
+      "bundleUrl": "i18n/i18n.properties",
+      "supportedLocales": [""],
+      "fallbackLocale": ""
+    },
     "applicationVersion": {
       "version": "1.0.0"
     },

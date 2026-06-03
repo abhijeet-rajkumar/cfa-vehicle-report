@@ -8,3 +8,31 @@
 .sapUiTableCell .sapMText {
 	white-space: nowrap;
 }
+
+/* ===== List / card view ===== */
+.cfaCard.sapMPanel {
+	border: 1px solid #e5e5e5;
+	border-radius: 0.75rem;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+/* muted, smaller labels for field captions */
+.cfaMutedLabel {
+	color: #6a6d70 !important;
+	font-size: 0.75rem !important;
+}
+
+/* divider between the object master panel and the characteristic groups */
+.cfaCardMaster {
+	border-right: 1px solid #ededed;
+	padding-right: 1rem;
+}
+
+.cfaCardGroups {
+	flex: 1;
+	min-width: 22rem;
+}
+
+.cfaGroupHeader {
+	margin-bottom: 0.25rem;
+}
