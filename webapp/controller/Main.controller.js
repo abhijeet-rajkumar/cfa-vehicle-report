@@ -1055,21 +1055,30 @@ sap.ui.define([
 		},
 
 		/**
-		 * Extract filter conditions from a MultiInput's tokens. Each condition is
+		 * Extract filter conditions from a MultiInput. Each condition is
 		 * { operation, value1, value2 } from the value-help range data, or a plain
-		 * equals for a directly-typed token.
+		 * "contains" for a directly-typed token. IMPORTANT: also picks up text the
+		 * user typed but did NOT turn into a token (i.e. typed then clicked Go without
+		 * pressing Enter) so the filter still applies.
 		 */
 		_tokenConditions: function (oMultiInput) {
 			if (!oMultiInput || !oMultiInput.getTokens) {
 				return [];
 			}
-			return oMultiInput.getTokens().map(function (oToken) {
+			var aConds = oMultiInput.getTokens().map(function (oToken) {
 				var oRange = oToken.data("range");
 				if (oRange && oRange.operation) {
 					return { operation: oRange.operation, value1: oRange.value1, value2: oRange.value2 };
 				}
-				return { operation: "EQ", value1: oToken.getKey() || oToken.getText(), value2: null };
-			}).filter(function (oCond) {
+				// a plain typed token -> forgiving "contains" match
+				return { operation: "Contains", value1: oToken.getKey() || oToken.getText(), value2: null };
+			});
+			// include text typed straight into the field but not yet tokenised
+			var sTyped = oMultiInput.getValue ? (oMultiInput.getValue() || "").trim() : "";
+			if (sTyped) {
+				aConds.push({ operation: "Contains", value1: sTyped, value2: null });
+			}
+			return aConds.filter(function (oCond) {
 				return oCond.value1 !== undefined && oCond.value1 !== null && oCond.value1 !== "";
 			});
 		},
