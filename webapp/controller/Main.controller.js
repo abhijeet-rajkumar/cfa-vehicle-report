@@ -15,6 +15,8 @@ sap.ui.define([
 	"sap/m/List",
 	"sap/m/StandardListItem",
 	"sap/m/Button",
+	"sap/m/ProgressIndicator",
+	"sap/m/VBox",
 	"sap/m/ViewSettingsDialog",
 	"sap/m/ViewSettingsItem",
 	"sap/ui/comp/valuehelpdialog/ValueHelpDialog",
@@ -22,7 +24,7 @@ sap.ui.define([
 	"sap/ui/core/format/DateFormat",
 	"sap/ui/export/Spreadsheet",
 	"sap/ui/export/library"
-], function (Controller, JSONModel, Sorter, Filter, FilterOperator, TableColumn, tableLibrary, FilterGroupItem, Input, Text, Label, MessageToast, Dialog, List, StandardListItem, Button, ViewSettingsDialog, ViewSettingsItem, ValueHelpDialog, DynamicDateRange, DateFormat, Spreadsheet, exportLibrary) {
+], function (Controller, JSONModel, Sorter, Filter, FilterOperator, TableColumn, tableLibrary, FilterGroupItem, Input, Text, Label, MessageToast, Dialog, List, StandardListItem, Button, ProgressIndicator, VBox, ViewSettingsDialog, ViewSettingsItem, ValueHelpDialog, DynamicDateRange, DateFormat, Spreadsheet, exportLibrary) {
 	"use strict";
 
 	var SortOrder = tableLibrary.SortOrder;
@@ -38,6 +40,12 @@ sap.ui.define([
 	// Every read is bounded so a wide/unfiltered projection can never trigger the
 	// CDS view's internal volume limit (DBSQL_SQL_INTERNAL_DB_ERROR).
 	var MAX_LIST_ROWS = 5000;
+
+	// Export batches the value fetch by this many objects per call so S/4HANA never
+	// has to materialise the whole class's characteristic values at once.
+	var EXPORT_BATCH_SIZE = 100;
+	// Per-batch row cap: 100 objects x up to ~99 characteristics, with headroom.
+	var EXPORT_VALUE_ROWS = 20000;
 
 	// Module-level date formatter for the fixed-column getters. Those getters are
 	// invoked unbound (oFixed.get(...)) so they cannot reach this._formatDate — this
@@ -81,6 +89,9 @@ sap.ui.define([
 				pageInfo: "",
 				pagePrevEnabled: false,
 				pageNextEnabled: false,
+
+				// caption above each card's object number (Equipment / Functional Location)
+				objectLabel: "",
 
 				// view switch (table | list) + list-view options
 				viewMode: "list",
@@ -773,17 +784,82 @@ sap.ui.define([
 			this._loadPage(0);
 		},
 
-		onExport: function () {
-			var oUI = this._ui();
-			var aColumns = oUI.getProperty("/columnConfig") || [];
-			var aRows = oUI.getProperty("/rows") || [];
+		/**
+		 * Export EVERY object in the current selection (all pages, all
+		 * characteristics) to a spreadsheet. The characteristic values are fetched in
+		 * batches of EXPORT_BATCH_SIZE objects so S/4HANA never has to materialise the
+		 * whole class at once; a modal progress dialog reports each batch and can be
+		 * cancelled.
+		 */
+		onExport: async function () {
+			var that = this;
+			var oBundle = this._bundle();
+			var ctx = this._pageCtx;
+			var aColumns = this._ui().getProperty("/columnConfig") || [];
 
-			if (!aRows.length) {
-				MessageToast.show(this._bundle().getText("nothingToExport"));
+			if (!ctx || !ctx.keys || !ctx.keys.length) {
+				MessageToast.show(oBundle.getText("nothingToExport"));
 				return;
 			}
 
-			var oSettings = {
+			var aAllKeys = ctx.keys.slice();
+			var iTotal = aAllKeys.length;
+			var aChunks = this._chunk(aAllKeys, EXPORT_BATCH_SIZE);
+
+			// ---- progress dialog ----
+			this._exportCancelled = false;
+			var oProgress = new ProgressIndicator({ percentValue: 0, displayValue: "0%", width: "100%", height: "1.25rem" });
+			var oStatus = new Text({ text: oBundle.getText("exportProgress", [0, iTotal]) });
+			var oDialog = new Dialog({
+				title: oBundle.getText("exportDialogTitle"),
+				contentWidth: "28rem",
+				escapeHandler: function (o) { o.reject(); }, // don't let ESC close mid-run
+				content: [ new VBox({ width: "100%", items: [ oStatus, oProgress ] }).addStyleClass("sapUiContentPadding") ],
+				beginButton: new Button({
+					text: oBundle.getText("cancelButton"),
+					press: function () { that._exportCancelled = true; }
+				})
+			});
+			this.getView().addDependent(oDialog);
+			oDialog.open();
+
+			var oContext = { className: ctx.className, classId: ctx.sClassId, classByKey: ctx.classByKey };
+			var aRows = [];
+
+			try {
+				for (var i = 0; i < aChunks.length; i++) {
+					if (this._exportCancelled) {
+						break;
+					}
+					var aChunk = aChunks[i];
+					var aValues = await this._fetchValuesForKeys(ctx.oCfg, aChunk, ctx.sClassId, ctx.classByKey, EXPORT_VALUE_ROWS);
+					aRows = aRows.concat(this._pivotData(aValues, ctx.aChars, ctx.mMeta, ctx.oCfg, oContext, ctx.headers, aChunk));
+
+					var iDone = Math.min((i + 1) * EXPORT_BATCH_SIZE, iTotal);
+					var iPct = Math.round((iDone / iTotal) * 100);
+					oProgress.setPercentValue(iPct);
+					oProgress.setDisplayValue(iPct + "%");
+					oStatus.setText(oBundle.getText("exportProgress", [iDone, iTotal]));
+				}
+			} catch (oError) {
+				oDialog.close();
+				oDialog.destroy();
+				this._showError(oBundle.getText("dataLoadError", [this._extractError(oError)]));
+				return;
+			}
+
+			if (this._exportCancelled) {
+				oDialog.close();
+				oDialog.destroy();
+				MessageToast.show(oBundle.getText("exportCancelled"));
+				return;
+			}
+
+			// ---- build the workbook ----
+			oStatus.setText(oBundle.getText("exportBuilding"));
+			oDialog.getBeginButton().setEnabled(false);
+
+			var oSheet = new Spreadsheet({
 				workbook: {
 					columns: aColumns.map(function (c) {
 						return { label: c.label, property: c.property, type: EdmType.String };
@@ -791,11 +867,11 @@ sap.ui.define([
 				},
 				dataSource: aRows,
 				fileName: "CharacteristicsReport.xlsx"
-			};
-
-			var oSheet = new Spreadsheet(oSettings);
+			});
 			oSheet.build().finally(function () {
 				oSheet.destroy();
+				oDialog.close();
+				oDialog.destroy();
 			});
 		},
 
@@ -1545,7 +1621,7 @@ sap.ui.define([
 		 * @param {string} sClassId the selected ClassInternalID
 		 * @returns {Promise<object[]>} value rows for this class
 		 */
-		_fetchValuesForKeys: async function (oCfg, aKeys, sClassId, mClassByKey) {
+		_fetchValuesForKeys: async function (oCfg, aKeys, sClassId, mClassByKey, iTop) {
 			var oModel = this._model(oCfg.modelName);
 			var sKeyField = oCfg.objectKeyField;
 			var that = this;
@@ -1555,7 +1631,9 @@ sap.ui.define([
 			var aRows = await this._read(oModel, oCfg.valueSet, {
 				"$filter": "(" + sOr + ")",
 				"$select": oCfg.valueSelect,
-				"$top": MAX_VALUE_ROWS
+				// the key OR-filter bounds the query to these objects, so a high cap is
+				// safe — it only limits rows returned, not the rows the DB scans
+				"$top": iTop || MAX_VALUE_ROWS
 			});
 			// keep each object's values for the class we resolved for it: a per-object
 			// map for multi-object/multi-class search, else a single class id.
@@ -1912,6 +1990,10 @@ sap.ui.define([
 			});
 
 			this._ui().setProperty("/columnConfig", aColumnConfig);
+
+			// caption shown above the object number on each list card (Equipment vs
+			// Functional Location) — first fixed column carries the right label
+			this._ui().setProperty("/objectLabel", oCfg.fixedColumns[0].label);
 
 			// sortable fields (the fixed columns) for the list-view sort buttons
 			this._ui().setProperty("/sortFields", oCfg.fixedColumns.map(function (oFixed) {
