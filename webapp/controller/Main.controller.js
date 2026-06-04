@@ -320,7 +320,8 @@ sap.ui.define([
 					supportRangesOnly: true,
 					key: "objNumber",
 					ok: this._onObjectVHDOk.bind(this),
-					cancel: function () { this._oObjectVHD.close(); }.bind(this)
+					cancel: function () { this._oObjectVHD.close(); }.bind(this),
+					afterClose: function () { if (this._oObjectVHD) { this._oObjectVHD.destroy(); this._oObjectVHD = null; } }.bind(this)
 				});
 				this.getView().addDependent(this._oObjectVHD);
 				this._oObjectVHD.setRangeKeyFields([{
@@ -349,7 +350,8 @@ sap.ui.define([
 					supportRangesOnly: true,
 					key: "charcValue",
 					ok: this._onValueVHDOk.bind(this),
-					cancel: function () { this._oValueVHD.close(); }.bind(this)
+					cancel: function () { this._oValueVHD.close(); }.bind(this),
+					afterClose: function () { if (this._oValueVHD) { this._oValueVHD.destroy(); this._oValueVHD = null; } }.bind(this)
 				});
 				this.getView().addDependent(this._oValueVHD);
 				this._oValueVHD.setRangeKeyFields([{
