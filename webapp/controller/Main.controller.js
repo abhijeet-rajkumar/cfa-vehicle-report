@@ -395,6 +395,48 @@ sap.ui.define([
 			this._oValueVHD.close();
 		},
 
+		/* ---- header-field value helps (serial / superior / planner / start-up) ---- */
+
+		onSerialValueHelp: function (oEvent) {
+			this._openRangesVHD(oEvent.getSource(), this._bundle().getText("filterSerial"), "string");
+		},
+		onSuperiorValueHelp: function (oEvent) {
+			this._openRangesVHD(oEvent.getSource(), this._bundle().getText("filterSuperior"), "string");
+		},
+		onPlannerValueHelp: function (oEvent) {
+			this._openRangesVHD(oEvent.getSource(), this._bundle().getText("filterPlanner"), "string");
+		},
+		onStartUpValueHelp: function (oEvent) {
+			this._openRangesVHD(oEvent.getSource(), this._bundle().getText("filterStartUp"), "date");
+		},
+
+		/**
+		 * Open a SAP-standard ranges Value Help Dialog (conditions tab only) for a
+		 * MultiInput filter. A fresh dialog is created each time and destroyed on
+		 * close, so conditions never leak between openings.
+		 * @param {sap.m.MultiInput} oMultiInput the filter field
+		 * @param {string} sLabel field label (dialog title + range key label)
+		 * @param {string} sType range key field type ("string" or "date")
+		 */
+		_openRangesVHD: function (oMultiInput, sLabel, sType) {
+			var oVHD = new ValueHelpDialog({
+				title: sLabel,
+				supportRanges: true,
+				supportRangesOnly: true,
+				key: "value",
+				ok: function (oEvent) {
+					oMultiInput.setTokens(oEvent.getParameter("tokens"));
+					oVHD.close();
+				},
+				cancel: function () { oVHD.close(); },
+				afterClose: function () { oVHD.destroy(); }
+			});
+			this.getView().addDependent(oVHD);
+			oVHD.setRangeKeyFields([{ key: "value", label: sLabel, type: sType }]);
+			oVHD.setTokens(oMultiInput.getTokens());
+			oVHD.open();
+		},
+
 		/** MultiInput tokens changed (typed or removed) -> run the object search. */
 		onObjectTokenUpdate: function () {
 			var that = this;
@@ -964,11 +1006,11 @@ sap.ui.define([
 			if (oCharc) {
 				oCharc.setSelectedKeys([]);
 			}
-			// header-level field filters
+			// header-level field filters (all MultiInputs now)
 			["serialFilter", "superiorFilter", "plannerFilter", "startupFilter"].forEach(function (sId) {
 				var oCtrl = this.byId(sId);
-				if (oCtrl && oCtrl.setValue) {
-					oCtrl.setValue("");
+				if (oCtrl && oCtrl.removeAllTokens) {
+					oCtrl.removeAllTokens();
 				}
 			}, this);
 		},
@@ -1040,11 +1082,13 @@ sap.ui.define([
 			var v1 = String(oCond.value1 == null ? "" : oCond.value1);
 			var v2 = String(oCond.value2 == null ? "" : oCond.value2);
 			var cmp = function (a, b) { return a.localeCompare(b, undefined, { numeric: true }); };
+			var sl = s.toLowerCase();
+			var v1l = v1.toLowerCase();
 			switch (oCond.operation) {
-				case "EQ": return s === v1;
-				case "Contains": return s.indexOf(v1) !== -1;
-				case "StartsWith": return s.indexOf(v1) === 0;
-				case "EndsWith": return s.length >= v1.length && s.lastIndexOf(v1) === s.length - v1.length;
+				case "EQ": return sl === v1l;
+				case "Contains": return sl.indexOf(v1l) !== -1;
+				case "StartsWith": return sl.indexOf(v1l) === 0;
+				case "EndsWith": return sl.length >= v1l.length && sl.lastIndexOf(v1l) === sl.length - v1l.length;
 				case "GT": return cmp(s, v1) > 0;
 				case "GE": return cmp(s, v1) >= 0;
 				case "LT": return cmp(s, v1) < 0;
@@ -1078,41 +1122,92 @@ sap.ui.define([
 			var mHeaders = ctx.headers || {};
 			var that = this;
 
-			function textFilter(aIn, sColKey, sNeedle) {
-				if (!sNeedle) {
+			// each text field narrows the set; within a field, ANY condition matches
+			function textTokenFilter(aIn, sId, sColKey) {
+				var aConds = that._tokenConditions(that.byId(sId));
+				if (!aConds.length) {
 					return aIn;
 				}
-				var sLower = sNeedle.toLowerCase();
 				return aIn.filter(function (sKey) {
 					var v = (mVals[sKey] && mVals[sKey][sColKey]) || "";
-					return v.toLowerCase().indexOf(sLower) !== -1;
+					return aConds.some(function (oCond) { return that._matchCondition(v, oCond); });
 				});
 			}
 
-			aKeys = textFilter(aKeys, "ManufacturerSerialNumber", this._filterVal("serialFilter"));
-			aKeys = textFilter(aKeys, "SuperiorObject", this._filterVal("superiorFilter"));
-			aKeys = textFilter(aKeys, "MaintenancePlannerGroup", this._filterVal("plannerFilter"));
+			aKeys = textTokenFilter(aKeys, "serialFilter", "ManufacturerSerialNumber");
+			aKeys = textTokenFilter(aKeys, "superiorFilter", "SuperiorObject");
+			aKeys = textTokenFilter(aKeys, "plannerFilter", "MaintenancePlannerGroup");
 
-			// Start-Up Date range (sap.m.DateRangeSelection -> from / to JS Dates)
-			var oDate = this.byId("startupFilter");
-			var dFrom = (oDate && oDate.getDateValue) ? oDate.getDateValue() : null;
-			var dTo = (oDate && oDate.getSecondDateValue) ? oDate.getSecondDateValue() : null;
-			if (dFrom || dTo) {
-				var nFrom = dFrom ? dFrom.getTime() : -Infinity;
-				// include the whole "to" day (end of day)
-				var nTo = dTo ? (dTo.getTime() + 86399999) : Infinity;
+			// Start-Up Date range conditions (date-aware, day granularity)
+			var aDateConds = this._tokenConditions(this.byId("startupFilter"));
+			if (aDateConds.length) {
 				var sDateField = ctx.oCfg.dateFilterField || "OperationStartDate";
 				aKeys = aKeys.filter(function (sKey) {
 					var raw = mHeaders[sKey] && mHeaders[sKey][sDateField];
 					if (!that._has(raw)) {
 						return false;
 					}
-					var t = that._epoch(raw);
-					return t >= nFrom && t <= nTo;
+					var nVal = that._epoch(raw);
+					return aDateConds.some(function (oCond) { return that._matchDateCondition(nVal, oCond); });
 				});
 			}
 
 			return aKeys;
+		},
+
+		/** Floor an epoch to the start of its calendar day (local time). */
+		_dayFloor: function (nEpoch) {
+			var d = new Date(nEpoch);
+			return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+		},
+
+		/** Tolerant date parse -> epoch (ms), or null. Handles Date, /Date()/,
+		 *  the app's display format, dd.mm.yyyy and ISO. */
+		_parseAnyDate: function (v) {
+			if (v === undefined || v === null || v === "") {
+				return null;
+			}
+			if (v instanceof Date) {
+				return v.getTime();
+			}
+			var s = String(v);
+			var m = /\/Date\((-?\d+)/.exec(s);
+			if (m) {
+				return parseInt(m[1], 10);
+			}
+			if (!this._oDateFormat) {
+				this._oDateFormat = DateFormat.getDateInstance();
+			}
+			var d = this._oDateFormat.parse(s);
+			if (d) {
+				return d.getTime();
+			}
+			var p = /^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})$/.exec(s);
+			if (p) {
+				var yr = parseInt(p[3], 10);
+				if (yr < 100) { yr += 2000; }
+				return new Date(yr, parseInt(p[2], 10) - 1, parseInt(p[1], 10)).getTime();
+			}
+			var t = Date.parse(s);
+			return isNaN(t) ? null : t;
+		},
+
+		/** Match an object's start-up date (epoch) against a date range condition. */
+		_matchDateCondition: function (nValEpoch, oCond) {
+			var vDay = this._dayFloor(nValEpoch);
+			var a = this._parseAnyDate(oCond.value1);
+			var b = this._parseAnyDate(oCond.value2);
+			var aDay = (a === null) ? null : this._dayFloor(a);
+			var bDay = (b === null) ? null : this._dayFloor(b);
+			switch (oCond.operation) {
+				case "EQ": return aDay !== null && vDay === aDay;
+				case "BT": return aDay !== null && bDay !== null && vDay >= aDay && vDay <= bDay;
+				case "GT": return aDay !== null && vDay > aDay;
+				case "GE": return aDay !== null && vDay >= aDay;
+				case "LT": return aDay !== null && vDay < aDay;
+				case "LE": return aDay !== null && vDay <= aDay;
+				default: return false;
+			}
 		},
 
 		/**

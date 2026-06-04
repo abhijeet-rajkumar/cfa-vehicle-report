@@ -98,22 +98,22 @@
 						</fb:FilterGroupItem>
 						<fb:FilterGroupItem name="serial" label="{i18n>filterSerial}" groupName="main" visibleInFilterBar="true">
 							<fb:control>
-								<Input id="serialFilter" width="100%" placeholder="{i18n>filterSerialPlaceholder}" />
+								<MultiInput id="serialFilter" width="100%" placeholder="{i18n>filterSerialPlaceholder}" showValueHelp="true" valueHelpRequest="onSerialValueHelp" />
 							</fb:control>
 						</fb:FilterGroupItem>
 						<fb:FilterGroupItem name="superior" label="{i18n>filterSuperior}" groupName="main" visibleInFilterBar="true">
 							<fb:control>
-								<Input id="superiorFilter" width="100%" placeholder="{i18n>filterSuperiorPlaceholder}" />
+								<MultiInput id="superiorFilter" width="100%" placeholder="{i18n>filterSuperiorPlaceholder}" showValueHelp="true" valueHelpRequest="onSuperiorValueHelp" />
 							</fb:control>
 						</fb:FilterGroupItem>
 						<fb:FilterGroupItem name="planner" label="{i18n>filterPlanner}" groupName="main" visibleInFilterBar="true">
 							<fb:control>
-								<Input id="plannerFilter" width="100%" placeholder="{i18n>filterPlannerPlaceholder}" />
+								<MultiInput id="plannerFilter" width="100%" placeholder="{i18n>filterPlannerPlaceholder}" showValueHelp="true" valueHelpRequest="onPlannerValueHelp" />
 							</fb:control>
 						</fb:FilterGroupItem>
 						<fb:FilterGroupItem name="startup" label="{i18n>filterStartUp}" groupName="main" visibleInFilterBar="true">
 							<fb:control>
-								<DateRangeSelection id="startupFilter" width="100%" placeholder="{i18n>filterStartUpPlaceholder}" />
+								<MultiInput id="startupFilter" width="100%" placeholder="{i18n>filterStartUpPlaceholder}" showValueHelp="true" valueHelpRequest="onStartUpValueHelp" />
 							</fb:control>
 						</fb:FilterGroupItem>
 					</fb:filterGroupItems>
