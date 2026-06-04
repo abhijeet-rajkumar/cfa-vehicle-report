@@ -113,6 +113,9 @@
 		<f:content>
 			<FlexBox direction="Column" fitContainer="true" renderType="Bare" width="100%" height="100%">
 
+				<!-- shown while the class data loads (before the table/list appears) -->
+				<BusyIndicator id="loadBusy" visible="{= ${ui>/tableBusy} &amp;&amp; !${ui>/showTable} }" class="sapUiMediumMarginTop" />
+
 				<MessageStrip
 					id="errorStrip"
 					text="{ui>/errorText}"

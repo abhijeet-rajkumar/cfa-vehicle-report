@@ -766,10 +766,15 @@ sap.ui.define([
 			var aClassIds = aClasses.map(function (c) { return c.ClassInternalID; });
 			var sClassKey = aClassIds.slice().sort().join(",");
 
-			// when the class set changes, clear the (now stale) filters
-			if (!this._pageCtx || this._pageCtx.classKey !== sClassKey) {
-				this._clearFilters();
+			// Same class set already loaded -> just re-apply the filters (no re-fetch
+			// of keys/headers). Makes changing a filter + Go instant.
+			if (this._pageCtx && this._pageCtx.classKey === sClassKey) {
+				await this._applyAllFilters();
+				return;
 			}
+
+			// class set changed -> clear the (now stale) filters and reload
+			this._clearFilters();
 
 			oUI.setProperty("/showEmptyState", false);
 			oUI.setProperty("/showNoData", false);
