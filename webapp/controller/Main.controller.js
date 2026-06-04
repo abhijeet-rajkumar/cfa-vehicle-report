@@ -867,25 +867,13 @@ sap.ui.define([
 				var oUnion = await this._fetchUnionCharacteristics(aClassIds);
 				this._buildColumns(oUnion.chars, oCfg);
 
-				// object keys + per-object class map across all selected classes
-				var aPerClass = await Promise.all(aClasses.map(function (oClass) {
-					return that._fetchAllObjectKeys(oCfg, oClass.ClassInternalID, sClassType).then(function (aKeys) {
-						return { cls: oClass, keys: aKeys };
-					});
-				}));
-				var mClassByKey = {};
-				var aAllKeys = [];
-				aPerClass.forEach(function (o) {
-					o.keys.forEach(function (sKey) {
-						if (sKey && !mClassByKey[sKey]) {
-							mClassByKey[sKey] = { ClassInternalID: o.cls.ClassInternalID, Class: o.cls.Class };
-							aAllKeys.push(sKey);
-						}
-					});
-				});
-
-				// single request per class (expand) instead of N chunked key fetches
-				var mHeaders = await this._fetchHeadersByClass(oCfg, aClasses, sClassType);
+				// ONE request per class: keys + per-object class map + headers, via the
+				// class->object expand (replaces the separate keys read and the
+				// previously chunked header reads).
+				var oObjects = await this._fetchClassObjects(oCfg, aClasses, sClassType);
+				var mClassByKey = oObjects.classByKey;
+				var aAllKeys = oObjects.allKeys;
+				var mHeaders = oObjects.headers;
 				var bMulti = aClasses.length > 1;
 				var oContext = {
 					className: bMulti ? this._bundle().getText("multipleClasses") : aClasses[0].Class,
@@ -1576,52 +1564,62 @@ sap.ui.define([
 		/* =========================================================== */
 
 		/**
-		 * Fetch every object's header for the selected class(es) in a SINGLE request
-		 * per class, by expanding the class->object navigation (to_Equipment /
-		 * to_FunctionalLocation). Replaces the previous N-chunks-of-100 key fetch.
+		 * Load the object keys, per-object class map AND headers for the selected
+		 * class(es) in a SINGLE request per class, by expanding the class->object
+		 * navigation (to_Equipment / to_FunctionalLocation). The class-assignment
+		 * row carries the key; the expanded entity carries the header — so one call
+		 * replaces both the keys read and the (previously chunked) header reads.
 		 * @param {object} oCfg type config
 		 * @param {object[]} aClasses [{ ClassInternalID, Class }]
 		 * @param {string} sClassType "002" | "003"
-		 * @returns {Promise<object>} map objectKey -> header row
+		 * @returns {Promise<{allKeys: string[], classByKey: object, headers: object}>}
 		 */
-		_fetchHeadersByClass: async function (oCfg, aClasses, sClassType) {
+		_fetchClassObjects: async function (oCfg, aClasses, sClassType) {
 			var that = this;
 			var oModel = this._model(oCfg.modelName);
 			var sKeyField = oCfg.objectKeyField;
 			var sNav = oCfg.headerExpandNav;
-			var mHeaders = {};
 
-			if (!sNav) {
-				return mHeaders; // no expand configured -> caller falls back
-			}
-
-			await Promise.all(aClasses.map(function (oClass) {
+			var aPerClass = await Promise.all(aClasses.map(function (oClass) {
 				return that._read(oModel, oCfg.keyClassSet, {
 					"$filter": "ClassInternalID eq '" + that._esc(oClass.ClassInternalID) + "' and ClassType eq '" + that._esc(sClassType) + "'",
 					"$expand": sNav,
 					"$select": oCfg.headerExpandSelect,
 					"$top": MAX_LIST_ROWS
 				}).then(function (aRows) {
-					aRows.forEach(function (oRow) {
-						var oHeader = oRow[sNav];
-						if (!oHeader) {
-							return; // object with no current-validity header record
-						}
-						var k = oHeader[sKeyField] || oRow[sKeyField];
-						if (!k) {
-							return;
-						}
-						// for time-dependent headers, keep the latest validity record
-						var oPrev = mHeaders[k];
-						if (!oPrev || !oCfg.headerHasValidity ||
-							that._epoch(oHeader.ValidityEndDate) >= that._epoch(oPrev.ValidityEndDate)) {
-							mHeaders[k] = oHeader;
-						}
-					});
+					return { cls: oClass, rows: aRows };
 				});
 			}));
 
-			return mHeaders;
+			var mClassByKey = {};
+			var aAllKeys = [];
+			var mHeaders = {};
+
+			aPerClass.forEach(function (o) {
+				o.rows.forEach(function (oRow) {
+					var sKey = oRow[sKeyField];
+					if (!sKey) {
+						return;
+					}
+					// keep the first class that claims an object (multi-class union)
+					if (!mClassByKey[sKey]) {
+						mClassByKey[sKey] = { ClassInternalID: o.cls.ClassInternalID, Class: o.cls.Class };
+						aAllKeys.push(sKey);
+					}
+					// header from the expanded object (may be null for no-validity rows)
+					var oHeader = oRow[sNav];
+					if (oHeader) {
+						var hk = oHeader[sKeyField] || sKey;
+						var oPrev = mHeaders[hk];
+						if (!oPrev || !oCfg.headerHasValidity ||
+							that._epoch(oHeader.ValidityEndDate) >= that._epoch(oPrev.ValidityEndDate)) {
+							mHeaders[hk] = oHeader;
+						}
+					}
+				});
+			});
+
+			return { allKeys: aAllKeys, classByKey: mClassByKey, headers: mHeaders };
 		},
 
 		_fetchHeaders: async function (oCfg, aKeys) {
