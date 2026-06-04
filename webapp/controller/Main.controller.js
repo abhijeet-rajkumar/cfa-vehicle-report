@@ -18,10 +18,11 @@ sap.ui.define([
 	"sap/m/ViewSettingsDialog",
 	"sap/m/ViewSettingsItem",
 	"sap/ui/comp/valuehelpdialog/ValueHelpDialog",
+	"sap/m/DynamicDateRange",
 	"sap/ui/core/format/DateFormat",
 	"sap/ui/export/Spreadsheet",
 	"sap/ui/export/library"
-], function (Controller, JSONModel, Sorter, Filter, FilterOperator, TableColumn, tableLibrary, FilterGroupItem, Input, Text, Label, MessageToast, Dialog, List, StandardListItem, Button, ViewSettingsDialog, ViewSettingsItem, ValueHelpDialog, DateFormat, Spreadsheet, exportLibrary) {
+], function (Controller, JSONModel, Sorter, Filter, FilterOperator, TableColumn, tableLibrary, FilterGroupItem, Input, Text, Label, MessageToast, Dialog, List, StandardListItem, Button, ViewSettingsDialog, ViewSettingsItem, ValueHelpDialog, DynamicDateRange, DateFormat, Spreadsheet, exportLibrary) {
 	"use strict";
 
 	var SortOrder = tableLibrary.SortOrder;
@@ -405,9 +406,6 @@ sap.ui.define([
 		},
 		onPlannerValueHelp: function (oEvent) {
 			this._openRangesVHD(oEvent.getSource(), this._bundle().getText("filterPlanner"), "string");
-		},
-		onStartUpValueHelp: function (oEvent) {
-			this._openRangesVHD(oEvent.getSource(), this._bundle().getText("filterStartUp"), "date");
 		},
 
 		/**
@@ -1006,13 +1004,18 @@ sap.ui.define([
 			if (oCharc) {
 				oCharc.setSelectedKeys([]);
 			}
-			// header-level field filters (all MultiInputs now)
-			["serialFilter", "superiorFilter", "plannerFilter", "startupFilter"].forEach(function (sId) {
+			// header-level text filters (MultiInputs)
+			["serialFilter", "superiorFilter", "plannerFilter"].forEach(function (sId) {
 				var oCtrl = this.byId(sId);
 				if (oCtrl && oCtrl.removeAllTokens) {
 					oCtrl.removeAllTokens();
 				}
 			}, this);
+			// Start-Up Date (DynamicDateRange)
+			var oStartUp = this.byId("startupFilter");
+			if (oStartUp && oStartUp.setValue) {
+				oStartUp.setValue(null);
+			}
 		},
 
 		_applyAllFilters: async function () {
@@ -1138,18 +1141,25 @@ sap.ui.define([
 			aKeys = textTokenFilter(aKeys, "superiorFilter", "SuperiorObject");
 			aKeys = textTokenFilter(aKeys, "plannerFilter", "MaintenancePlannerGroup");
 
-			// Start-Up Date range conditions (date-aware, day granularity)
-			var aDateConds = this._tokenConditions(this.byId("startupFilter"));
-			if (aDateConds.length) {
-				var sDateField = ctx.oCfg.dateFilterField || "OperationStartDate";
-				aKeys = aKeys.filter(function (sKey) {
-					var raw = mHeaders[sKey] && mHeaders[sKey][sDateField];
-					if (!that._has(raw)) {
-						return false;
-					}
-					var nVal = that._epoch(raw);
-					return aDateConds.some(function (oCond) { return that._matchDateCondition(nVal, oCond); });
-				});
+			// Start-Up Date — sap.m.DynamicDateRange (Today / Last X days / range / ...)
+			var oDDR = this.byId("startupFilter");
+			var oDDRValue = (oDDR && oDDR.getValue) ? oDDR.getValue() : null;
+			if (oDDRValue) {
+				var aBounds = DynamicDateRange.toDates(oDDRValue);
+				if (aBounds && aBounds.length) {
+					var ms = function (d) { return d.getJSDate ? d.getJSDate().getTime() : d.getTime(); };
+					var nFromDay = this._dayFloor(ms(aBounds[0]));
+					var nToDay = this._dayFloor(ms(aBounds[aBounds.length - 1]));
+					var sDateField = ctx.oCfg.dateFilterField || "OperationStartDate";
+					aKeys = aKeys.filter(function (sKey) {
+						var raw = mHeaders[sKey] && mHeaders[sKey][sDateField];
+						if (!that._has(raw)) {
+							return false;
+						}
+						var vDay = that._dayFloor(that._epoch(raw));
+						return vDay >= nFromDay && vDay <= nToDay;
+					});
+				}
 			}
 
 			return aKeys;
@@ -1159,55 +1169,6 @@ sap.ui.define([
 		_dayFloor: function (nEpoch) {
 			var d = new Date(nEpoch);
 			return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-		},
-
-		/** Tolerant date parse -> epoch (ms), or null. Handles Date, /Date()/,
-		 *  the app's display format, dd.mm.yyyy and ISO. */
-		_parseAnyDate: function (v) {
-			if (v === undefined || v === null || v === "") {
-				return null;
-			}
-			if (v instanceof Date) {
-				return v.getTime();
-			}
-			var s = String(v);
-			var m = /\/Date\((-?\d+)/.exec(s);
-			if (m) {
-				return parseInt(m[1], 10);
-			}
-			if (!this._oDateFormat) {
-				this._oDateFormat = DateFormat.getDateInstance();
-			}
-			var d = this._oDateFormat.parse(s);
-			if (d) {
-				return d.getTime();
-			}
-			var p = /^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})$/.exec(s);
-			if (p) {
-				var yr = parseInt(p[3], 10);
-				if (yr < 100) { yr += 2000; }
-				return new Date(yr, parseInt(p[2], 10) - 1, parseInt(p[1], 10)).getTime();
-			}
-			var t = Date.parse(s);
-			return isNaN(t) ? null : t;
-		},
-
-		/** Match an object's start-up date (epoch) against a date range condition. */
-		_matchDateCondition: function (nValEpoch, oCond) {
-			var vDay = this._dayFloor(nValEpoch);
-			var a = this._parseAnyDate(oCond.value1);
-			var b = this._parseAnyDate(oCond.value2);
-			var aDay = (a === null) ? null : this._dayFloor(a);
-			var bDay = (b === null) ? null : this._dayFloor(b);
-			switch (oCond.operation) {
-				case "EQ": return aDay !== null && vDay === aDay;
-				case "BT": return aDay !== null && bDay !== null && vDay >= aDay && vDay <= bDay;
-				case "GT": return aDay !== null && vDay > aDay;
-				case "GE": return aDay !== null && vDay >= aDay;
-				case "LT": return aDay !== null && vDay < aDay;
-				case "LE": return aDay !== null && vDay <= aDay;
-				default: return false;
-			}
 		},
 
 		/**

@@ -113,7 +113,7 @@
 						</fb:FilterGroupItem>
 						<fb:FilterGroupItem name="startup" label="{i18n>filterStartUp}" groupName="main" visibleInFilterBar="true">
 							<fb:control>
-								<MultiInput id="startupFilter" width="100%" placeholder="{i18n>filterStartUpPlaceholder}" showValueHelp="true" valueHelpRequest="onStartUpValueHelp" />
+								<DynamicDateRange id="startupFilter" width="100%" />
 							</fb:control>
 						</fb:FilterGroupItem>
 					</fb:filterGroupItems>
