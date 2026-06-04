@@ -154,6 +154,10 @@ sap.ui.define([
 					dateFilterField: "OperationStartDate",
 					// class-assignment entity used to page the objects in a class
 					keyClassSet: "/EquipmentClass",
+					// single-call header fetch: expand the class->object navigation so
+					// one request returns every object's header data for the class.
+					headerExpandNav: "to_Equipment",
+					headerExpandSelect: "Equipment,to_Equipment/Equipment,to_Equipment/EquipmentName,to_Equipment/MaintenancePlant,to_Equipment/ValidityEndDate,to_Equipment/ManufacturerSerialNumber,to_Equipment/OperationStartDate,to_Equipment/MaintenancePlannerGroup,to_Equipment/FunctionalLocationLabelName,to_Equipment/SuperordinateEquipment",
 					fixedColumns: [
 						{ key: "objNumber", label: oBundle.getText("colEquipment"), width: "11rem", get: function (sKey) { return sKey; } },
 						{ key: "objDesc", label: oBundle.getText("colDescription"), width: "18rem", get: function (sKey, oHeader) { return oHeader.EquipmentName; } },
@@ -179,6 +183,8 @@ sap.ui.define([
 					headerHasValidity: false,
 					dateFilterField: "OperationStartDate",
 					keyClassSet: "/FunctionalLocationClass",
+					headerExpandNav: "to_FunctionalLocation",
+					headerExpandSelect: "FunctionalLocation,to_FunctionalLocation/FunctionalLocation,to_FunctionalLocation/FunctionalLocationName,to_FunctionalLocation/FunctionalLocationCategory,to_FunctionalLocation/SuperiorFunctionalLocation,to_FunctionalLocation/ManufacturerSerialNumber,to_FunctionalLocation/OperationStartDate,to_FunctionalLocation/MaintenancePlannerGroup",
 					fixedColumns: [
 						{ key: "objNumber", label: oBundle.getText("colFuncLoc"), width: "14rem", get: function (sKey) { return sKey; } },
 						{ key: "objDesc", label: oBundle.getText("colDescription"), width: "18rem", get: function (sKey, oHeader) { return oHeader.FunctionalLocationName; } },
@@ -878,7 +884,8 @@ sap.ui.define([
 					});
 				});
 
-				var mHeaders = await this._fetchHeaders(oCfg, aAllKeys);
+				// single request per class (expand) instead of N chunked key fetches
+				var mHeaders = await this._fetchHeadersByClass(oCfg, aClasses, sClassType);
 				var bMulti = aClasses.length > 1;
 				var oContext = {
 					className: bMulti ? this._bundle().getText("multipleClasses") : aClasses[0].Class,
@@ -1567,6 +1574,55 @@ sap.ui.define([
 		/* =========================================================== */
 		/* pivot: tall (object,charc,value) rows -> wide object rows    */
 		/* =========================================================== */
+
+		/**
+		 * Fetch every object's header for the selected class(es) in a SINGLE request
+		 * per class, by expanding the class->object navigation (to_Equipment /
+		 * to_FunctionalLocation). Replaces the previous N-chunks-of-100 key fetch.
+		 * @param {object} oCfg type config
+		 * @param {object[]} aClasses [{ ClassInternalID, Class }]
+		 * @param {string} sClassType "002" | "003"
+		 * @returns {Promise<object>} map objectKey -> header row
+		 */
+		_fetchHeadersByClass: async function (oCfg, aClasses, sClassType) {
+			var that = this;
+			var oModel = this._model(oCfg.modelName);
+			var sKeyField = oCfg.objectKeyField;
+			var sNav = oCfg.headerExpandNav;
+			var mHeaders = {};
+
+			if (!sNav) {
+				return mHeaders; // no expand configured -> caller falls back
+			}
+
+			await Promise.all(aClasses.map(function (oClass) {
+				return that._read(oModel, oCfg.keyClassSet, {
+					"$filter": "ClassInternalID eq '" + that._esc(oClass.ClassInternalID) + "' and ClassType eq '" + that._esc(sClassType) + "'",
+					"$expand": sNav,
+					"$select": oCfg.headerExpandSelect,
+					"$top": MAX_LIST_ROWS
+				}).then(function (aRows) {
+					aRows.forEach(function (oRow) {
+						var oHeader = oRow[sNav];
+						if (!oHeader) {
+							return; // object with no current-validity header record
+						}
+						var k = oHeader[sKeyField] || oRow[sKeyField];
+						if (!k) {
+							return;
+						}
+						// for time-dependent headers, keep the latest validity record
+						var oPrev = mHeaders[k];
+						if (!oPrev || !oCfg.headerHasValidity ||
+							that._epoch(oHeader.ValidityEndDate) >= that._epoch(oPrev.ValidityEndDate)) {
+							mHeaders[k] = oHeader;
+						}
+					});
+				});
+			}));
+
+			return mHeaders;
+		},
 
 		_fetchHeaders: async function (oCfg, aKeys) {
 			var mHeaders = {};
