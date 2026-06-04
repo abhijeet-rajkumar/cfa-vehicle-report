@@ -38,6 +38,17 @@ sap.ui.define([
 	// CDS view's internal volume limit (DBSQL_SQL_INTERNAL_DB_ERROR).
 	var MAX_LIST_ROWS = 5000;
 
+	// Module-level date formatter for the fixed-column getters. Those getters are
+	// invoked unbound (oFixed.get(...)) so they cannot reach this._formatDate — this
+	// closure-scoped helper formats SAP OData V2 /Date(ms)/ values for display.
+	var DATE_FMT = DateFormat.getDateInstance();
+	function fmtSAPDate(v) {
+		if (v === undefined || v === null || v === "") { return ""; }
+		if (v instanceof Date) { return DATE_FMT.format(v); }
+		var m = /\/Date\((-?\d+)/.exec(String(v));
+		return m ? DATE_FMT.format(new Date(parseInt(m[1], 10))) : String(v);
+	}
+
 	return Controller.extend("com.cfa.charlist.controller.Main", {
 
 		/* =========================================================== */
@@ -136,14 +147,20 @@ sap.ui.define([
 					// header read separately ($expand on the value view dumps on the DB).
 					// Equipment is time-dependent (key includes ValidityEndDate).
 					headerSet: "/Equipment",
-					headerSelect: "Equipment,EquipmentName,MaintenancePlant,ValidityEndDate",
+					headerSelect: "Equipment,EquipmentName,MaintenancePlant,ValidityEndDate,ManufacturerSerialNumber,OperationStartDate,MaintenancePlannerGroup,FunctionalLocationLabelName,SuperordinateEquipment",
 					headerHasValidity: true,
+					// raw header field used by the Start-Up Date range filter
+					dateFilterField: "OperationStartDate",
 					// class-assignment entity used to page the objects in a class
 					keyClassSet: "/EquipmentClass",
 					fixedColumns: [
 						{ key: "objNumber", label: oBundle.getText("colEquipment"), width: "11rem", get: function (sKey) { return sKey; } },
 						{ key: "objDesc", label: oBundle.getText("colDescription"), width: "18rem", get: function (sKey, oHeader) { return oHeader.EquipmentName; } },
 						{ key: "objClass", label: oBundle.getText("colClass"), width: "11rem", get: function (sKey, oHeader, oRow, oCtx) { return (oCtx.classByKey && oCtx.classByKey[sKey] && oCtx.classByKey[sKey].Class) || oCtx.className; } },
+						{ key: "ManufacturerSerialNumber", label: oBundle.getText("colSerialNo"), width: "12rem", get: function (sKey, oHeader) { return oHeader.ManufacturerSerialNumber; } },
+						{ key: "SuperiorObject", label: oBundle.getText("colSuperiorObj"), width: "16rem", get: function (sKey, oHeader) { return oHeader.FunctionalLocationLabelName || oHeader.SuperordinateEquipment; } },
+						{ key: "OperationStartDate", label: oBundle.getText("colStartUp"), width: "10rem", get: function (sKey, oHeader) { return fmtSAPDate(oHeader.OperationStartDate); } },
+						{ key: "MaintenancePlannerGroup", label: oBundle.getText("colPlannerGroup"), width: "9rem", get: function (sKey, oHeader) { return oHeader.MaintenancePlannerGroup; } },
 						{ key: "MaintenancePlant", label: oBundle.getText("colMaintPlant"), width: "9rem", get: function (sKey, oHeader) { return oHeader.MaintenancePlant; } }
 					]
 				},
@@ -157,15 +174,19 @@ sap.ui.define([
 					valueSelect: "FunctionalLocation,ClassInternalID,CharcInternalID,Characteristic,CharcDataType,CharcValue,CharcValuePositionNumber,CharcFromNumericValue,CharcFromDecimalValue,CharcFromDate,CharcFromAmount,Currency",
 					objectKeyField: "FunctionalLocation",
 					headerSet: "/FunctionalLocation",
-					headerSelect: "FunctionalLocation,FunctionalLocationName,FunctionalLocationCategory,SuperiorFunctionalLocation",
+					headerSelect: "FunctionalLocation,FunctionalLocationName,FunctionalLocationCategory,SuperiorFunctionalLocation,ManufacturerSerialNumber,OperationStartDate,MaintenancePlannerGroup",
 					headerHasValidity: false,
+					dateFilterField: "OperationStartDate",
 					keyClassSet: "/FunctionalLocationClass",
 					fixedColumns: [
 						{ key: "objNumber", label: oBundle.getText("colFuncLoc"), width: "14rem", get: function (sKey) { return sKey; } },
 						{ key: "objDesc", label: oBundle.getText("colDescription"), width: "18rem", get: function (sKey, oHeader) { return oHeader.FunctionalLocationName; } },
 						{ key: "objClass", label: oBundle.getText("colClass"), width: "11rem", get: function (sKey, oHeader, oRow, oCtx) { return (oCtx.classByKey && oCtx.classByKey[sKey] && oCtx.classByKey[sKey].Class) || oCtx.className; } },
-						{ key: "FunctionalLocationCategory", label: oBundle.getText("colCategory"), width: "8rem", get: function (sKey, oHeader) { return oHeader.FunctionalLocationCategory; } },
-						{ key: "SuperiorFunctionalLocation", label: oBundle.getText("colSuperiorFL"), width: "14rem", get: function (sKey, oHeader) { return oHeader.SuperiorFunctionalLocation; } }
+						{ key: "ManufacturerSerialNumber", label: oBundle.getText("colSerialNo"), width: "12rem", get: function (sKey, oHeader) { return oHeader.ManufacturerSerialNumber; } },
+						{ key: "SuperiorObject", label: oBundle.getText("colSuperiorObj"), width: "16rem", get: function (sKey, oHeader) { return oHeader.SuperiorFunctionalLocation; } },
+						{ key: "OperationStartDate", label: oBundle.getText("colStartUp"), width: "10rem", get: function (sKey, oHeader) { return fmtSAPDate(oHeader.OperationStartDate); } },
+						{ key: "MaintenancePlannerGroup", label: oBundle.getText("colPlannerGroup"), width: "9rem", get: function (sKey, oHeader) { return oHeader.MaintenancePlannerGroup; } },
+						{ key: "FunctionalLocationCategory", label: oBundle.getText("colCategory"), width: "8rem", get: function (sKey, oHeader) { return oHeader.FunctionalLocationCategory; } }
 					]
 				}
 			};
@@ -943,6 +964,13 @@ sap.ui.define([
 			if (oCharc) {
 				oCharc.setSelectedKeys([]);
 			}
+			// header-level field filters
+			["serialFilter", "superiorFilter", "plannerFilter", "startupFilter"].forEach(function (sId) {
+				var oCtrl = this.byId(sId);
+				if (oCtrl && oCtrl.setValue) {
+					oCtrl.setValue("");
+				}
+			}, this);
 		},
 
 		_applyAllFilters: async function () {
@@ -963,6 +991,10 @@ sap.ui.define([
 						return aObjConds.some(function (oCond) { return this._matchCondition(sKey, oCond); }, this);
 					}, this);
 				}
+
+				// header-level field filters (serial no., superior object, planner
+				// group, start-up date) — matched in memory against the loaded headers
+				aKeys = this._applyHeaderFilters(aKeys);
 
 				// characteristic-value conditions — resolve matching objects server-side
 				var aValConds = this._tokenConditions(this.byId("charcValueSearch"));
@@ -1020,6 +1052,67 @@ sap.ui.define([
 				case "BT": return cmp(s, v1) >= 0 && cmp(s, v2) <= 0;
 				default: return s.indexOf(v1) !== -1;
 			}
+		},
+
+		/** Read + trim the string value of a filter-bar input by id. */
+		_filterVal: function (sId) {
+			var oCtrl = this.byId(sId);
+			return (oCtrl && oCtrl.getValue) ? (oCtrl.getValue() || "").trim() : "";
+		},
+
+		/**
+		 * Apply the header-level field filters (Manufacturer Serial Number, Superior
+		 * Technical Object, Planner Group and Start-Up Date range) to the working key
+		 * list. All four are matched in memory against the headers we already hold —
+		 * the text fields via the pre-computed display values (sortVals), the date via
+		 * the raw header field — so this is cheap and needs no server round-trip.
+		 * @param {string[]} aKeys candidate object keys
+		 * @returns {string[]} keys that pass every active header filter
+		 */
+		_applyHeaderFilters: function (aKeys) {
+			var ctx = this._pageCtx;
+			if (!ctx) {
+				return aKeys;
+			}
+			var mVals = ctx.sortVals || {};
+			var mHeaders = ctx.headers || {};
+			var that = this;
+
+			function textFilter(aIn, sColKey, sNeedle) {
+				if (!sNeedle) {
+					return aIn;
+				}
+				var sLower = sNeedle.toLowerCase();
+				return aIn.filter(function (sKey) {
+					var v = (mVals[sKey] && mVals[sKey][sColKey]) || "";
+					return v.toLowerCase().indexOf(sLower) !== -1;
+				});
+			}
+
+			aKeys = textFilter(aKeys, "ManufacturerSerialNumber", this._filterVal("serialFilter"));
+			aKeys = textFilter(aKeys, "SuperiorObject", this._filterVal("superiorFilter"));
+			aKeys = textFilter(aKeys, "MaintenancePlannerGroup", this._filterVal("plannerFilter"));
+
+			// Start-Up Date range (sap.m.DateRangeSelection -> from / to JS Dates)
+			var oDate = this.byId("startupFilter");
+			var dFrom = (oDate && oDate.getDateValue) ? oDate.getDateValue() : null;
+			var dTo = (oDate && oDate.getSecondDateValue) ? oDate.getSecondDateValue() : null;
+			if (dFrom || dTo) {
+				var nFrom = dFrom ? dFrom.getTime() : -Infinity;
+				// include the whole "to" day (end of day)
+				var nTo = dTo ? (dTo.getTime() + 86399999) : Infinity;
+				var sDateField = ctx.oCfg.dateFilterField || "OperationStartDate";
+				aKeys = aKeys.filter(function (sKey) {
+					var raw = mHeaders[sKey] && mHeaders[sKey][sDateField];
+					if (!that._has(raw)) {
+						return false;
+					}
+					var t = that._epoch(raw);
+					return t >= nFrom && t <= nTo;
+				});
+			}
+
+			return aKeys;
 		},
 
 		/**
@@ -1682,48 +1775,21 @@ sap.ui.define([
 		},
 
 		_buildColumns: function (aChars, oCfg) {
-			var oTable = this.byId("resultTable");
-			oTable.removeAllColumns();
-
-			// fresh result-filter state for the new dataset
+			// The app is list-only; there is no grid to build. We still derive the
+			// column model used by the Excel export and the list-view sort fields.
 			this._resultFilters = {};
 			this._globalSearch = "";
-			var oSearch = this.byId("resultSearch");
-			if (oSearch) {
-				oSearch.setValue("");
-			}
-			var oOldBinding = oTable.getBinding("rows");
-			if (oOldBinding) {
-				oOldBinding.filter([]);
-			}
 
 			var aColumnConfig = [];
 
-			// fixed columns (frozen, leftmost). filterProperty enables the in-grid filter.
+			// fixed object-master columns
 			oCfg.fixedColumns.forEach(function (oFixed) {
-				oTable.addColumn(new TableColumn({
-					label: new Label({ text: oFixed.label }),
-					template: new Text({ text: "{ui>" + oFixed.key + "}", wrapping: false }),
-					width: oFixed.width,
-					sortProperty: oFixed.key,
-					autoResizable: true
-				}));
 				aColumnConfig.push({ label: oFixed.label, property: oFixed.key });
 			});
 
-			// freeze the fixed columns
-			oTable.setFixedColumnCount(oCfg.fixedColumns.length);
-
 			// dynamic columns: one per characteristic, in position order
 			aChars.forEach(function (oChar) {
-				var sProp = "C_" + oChar.CharcInternalID;
-				oTable.addColumn(new TableColumn({
-					label: new Label({ text: oChar.Characteristic, tooltip: oChar.Characteristic }),
-					template: new Text({ text: "{ui>" + sProp + "}", wrapping: false }),
-					width: "10rem",
-															autoResizable: true
-				}));
-				aColumnConfig.push({ label: oChar.Characteristic, property: sProp });
+				aColumnConfig.push({ label: oChar.Characteristic, property: "C_" + oChar.CharcInternalID });
 			});
 
 			this._ui().setProperty("/columnConfig", aColumnConfig);
@@ -1799,7 +1865,11 @@ sap.ui.define([
 		 * global search (OR across all columns), then refresh the count.
 		 */
 		_applyResultFilters: function () {
+			// list-only build: the in-grid result filter no longer exists
 			var oTable = this.byId("resultTable");
+			if (!oTable) {
+				return;
+			}
 			var oBinding = oTable.getBinding("rows");
 			if (!oBinding) {
 				return;

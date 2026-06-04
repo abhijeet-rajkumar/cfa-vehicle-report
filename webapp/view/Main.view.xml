@@ -19,14 +19,6 @@
 				<f:expandedContent>
 					<Label text="{i18n>appSubtitle}" />
 				</f:expandedContent>
-				<f:actions>
-					<SegmentedButton selectedKey="{ui>/viewMode}" enabled="{= !${ui>/multiClass} }">
-						<items>
-							<SegmentedButtonItem key="table" icon="sap-icon://table-view" tooltip="{i18n>tableView}" />
-							<SegmentedButtonItem key="list" icon="sap-icon://list" tooltip="{i18n>listView}" />
-						</items>
-					</SegmentedButton>
-				</f:actions>
 			</f:DynamicPageTitle>
 		</f:title>
 
@@ -104,6 +96,26 @@
 									valueHelpRequest="onCharcValueValueHelp" />
 							</fb:control>
 						</fb:FilterGroupItem>
+						<fb:FilterGroupItem name="serial" label="{i18n>filterSerial}" groupName="main" visibleInFilterBar="true">
+							<fb:control>
+								<Input id="serialFilter" width="100%" placeholder="{i18n>filterSerialPlaceholder}" />
+							</fb:control>
+						</fb:FilterGroupItem>
+						<fb:FilterGroupItem name="superior" label="{i18n>filterSuperior}" groupName="main" visibleInFilterBar="true">
+							<fb:control>
+								<Input id="superiorFilter" width="100%" placeholder="{i18n>filterSuperiorPlaceholder}" />
+							</fb:control>
+						</fb:FilterGroupItem>
+						<fb:FilterGroupItem name="planner" label="{i18n>filterPlanner}" groupName="main" visibleInFilterBar="true">
+							<fb:control>
+								<Input id="plannerFilter" width="100%" placeholder="{i18n>filterPlannerPlaceholder}" />
+							</fb:control>
+						</fb:FilterGroupItem>
+						<fb:FilterGroupItem name="startup" label="{i18n>filterStartUp}" groupName="main" visibleInFilterBar="true">
+							<fb:control>
+								<DateRangeSelection id="startupFilter" width="100%" placeholder="{i18n>filterStartUpPlaceholder}" />
+							</fb:control>
+						</fb:FilterGroupItem>
 					</fb:filterGroupItems>
 				</fb:FilterBar>
 			</f:DynamicPageHeader>
@@ -153,40 +165,15 @@
 						<core:Item key="100" text="100" />
 					</Select>
 					<ToolbarSpacer />
-					<Switch id="showEmptySwitch" state="{ui>/showEmpty}" change="onShowEmptyChange" visible="{= ${ui>/viewMode} === 'list' }" />
-					<Label text="{i18n>showEmpty}" visible="{= ${ui>/viewMode} === 'list' }" />
-					<SearchField id="resultSearch" width="16rem" placeholder="{i18n>resultSearchPlaceholder}" search="onResultSearch" liveChange="onResultSearch" visible="{= ${ui>/viewMode} === 'table' }" />
-					<Button id="sortBtn" icon="sap-icon://sort" text="{i18n>sortButton}" tooltip="{i18n>sortButton}" press="onSortPress" />
+					<Switch id="showEmptySwitch" state="{ui>/showEmpty}" change="onShowEmptyChange" />
+					<Label text="{i18n>showEmpty}" />
 					<Button id="exportBtn" icon="sap-icon://excel-attachment" text="{i18n>exportButton}" tooltip="{i18n>exportButton}" press="onExport" />
 				</OverflowToolbar>
 
-				<!-- TABLE VIEW -->
-				<table:Table
-					id="resultTable"
-					visible="{= ${ui>/showTable} &amp;&amp; ${ui>/viewMode} === 'table' }"
-					rows="{ path: 'ui>/rows', templateShareable: false }"
-					selectionMode="None"
-					selectionBehavior="RowOnly"
-					enableColumnReordering="true"
-					enableColumnFreeze="true"
-					showColumnVisibilityMenu="true"
-					columnHeaderHeight="44"
-					rowHeight="32"
-					visibleRowCountMode="Auto"
-					minAutoRowCount="5"
-					busy="{ui>/tableBusy}"
-					busyIndicatorDelay="0"
-					sort="onColumnSort">
-					<table:layoutData>
-						<FlexItemData growFactor="1" />
-					</table:layoutData>
-					<!-- Columns are generated dynamically in Main.controller.js::_buildColumns -->
-				</table:Table>
-
-				<!-- LIST / CARD VIEW -->
+				<!-- LIST / CARD VIEW (the only result view) -->
 				<ScrollContainer
 					id="listView"
-					visible="{= ${ui>/showTable} &amp;&amp; ${ui>/viewMode} === 'list' }"
+					visible="{ui>/showTable}"
 					vertical="true"
 					horizontal="false"
 					height="100%"
@@ -198,7 +185,7 @@
 					</layoutData>
 					<OverflowToolbar class="sapUiTinyMarginBottom">
 							<Label text="{i18n>sortBy}" />
-							<HBox items="{ path: 'ui>/sortFields', templateShareable: false }">
+							<HBox wrap="Wrap" items="{ path: 'ui>/sortFields', templateShareable: false }">
 								<Button text="{ui>label}" press="onSortFieldPress" type="{= ${ui>key} === ${ui>/sortField} ? 'Emphasized' : 'Transparent' }" icon="{= ${ui>key} === ${ui>/sortField} ? (${ui>/sortDesc} ? 'sap-icon://sort-descending' : 'sap-icon://sort-ascending') : 'sap-icon://sort' }" class="sapUiTinyMarginEnd" />
 							</HBox>
 						</OverflowToolbar>
