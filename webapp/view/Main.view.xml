@@ -193,17 +193,18 @@
 						<Panel class="cfaCard sapUiSmallMarginTop sapUiSmallMarginBegin sapUiSmallMarginEnd" backgroundDesign="Solid">
 							<HBox wrap="Wrap" alignItems="Start">
 								<!-- left: object master -->
-								<VBox width="15rem" class="sapUiSmallMargin cfaCardMaster">
+								<VBox width="22rem" class="sapUiSmallMargin cfaCardMaster">
 									<Label text="{i18n>colEquipment}" class="cfaMutedLabel" />
 									<Title text="{ui>objNumber}" level="H3" wrapping="true" />
 									<Text text="{ui>objDesc}" class="sapUiTinyMarginTop" />
 									<ObjectStatus text="{ui>objClass}" icon="sap-icon://tag" state="Information" inverted="true" class="sapUiTinyMarginTop" />
-									<VBox items="{ path: 'ui>masterFields', templateShareable: false }">
-										<VBox class="sapUiTinyMarginTop">
-											<Label text="{ui>label}" class="cfaMutedLabel" />
+									<!-- master fields in a two-column wrapping grid to keep the card compact -->
+									<HBox wrap="Wrap" class="sapUiTinyMarginTop" items="{ path: 'ui>masterFields', templateShareable: false }">
+										<VBox width="9.5rem" class="sapUiTinyMarginTop sapUiTinyMarginEnd">
+											<Label text="{ui>label}" class="cfaMutedLabel" wrapping="true" />
 											<Text text="{ui>value}" />
 										</VBox>
-									</VBox>
+									</HBox>
 								</VBox>
 								<!-- right: grouped characteristics -->
 								<VBox class="sapUiSmallMargin cfaCardGroups" items="{ path: 'ui>groups', templateShareable: false }">
