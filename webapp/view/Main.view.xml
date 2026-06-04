@@ -153,7 +153,7 @@
 						<core:Item key="100" text="100" />
 					</Select>
 					<ToolbarSpacer />
-					<Switch id="showEmptySwitch" state="{ui>/showEmpty}" visible="{= ${ui>/viewMode} === 'list' }" />
+					<Switch id="showEmptySwitch" state="{ui>/showEmpty}" change="onShowEmptyChange" visible="{= ${ui>/viewMode} === 'list' }" />
 					<Label text="{i18n>showEmpty}" visible="{= ${ui>/viewMode} === 'list' }" />
 					<SearchField id="resultSearch" width="16rem" placeholder="{i18n>resultSearchPlaceholder}" search="onResultSearch" liveChange="onResultSearch" visible="{= ${ui>/viewMode} === 'table' }" />
 					<Button id="sortBtn" icon="sap-icon://sort" text="{i18n>sortButton}" tooltip="{i18n>sortButton}" press="onSortPress" />

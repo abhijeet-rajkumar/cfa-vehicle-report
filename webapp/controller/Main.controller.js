@@ -675,6 +675,15 @@ sap.ui.define([
 			oDialog.open();
 		},
 
+		/** "Show empty characteristics" toggled — rebuild the cards for the page. */
+		onShowEmptyChange: function () {
+			if (!this._pageCtx) {
+				return;
+			}
+			var aRows = this._ui().getProperty("/rows") || [];
+			this._ui().setProperty("/listRows", this._buildListRows(aRows, this._pageCtx.aChars, this._pageCtx.mMeta));
+		},
+
 		onPrevPage: function () {
 			if (this._currentPage > 0) {
 				this._loadPage(this._currentPage - 1);
@@ -1562,6 +1571,61 @@ sap.ui.define([
 		 * @returns {object[]} list-view rows
 		 */
 		_buildListRows: function (aRows, aChars, mMeta) {
+			var oCfg = this._pageCtx ? this._pageCtx.oCfg : null;
+			var aFixed = oCfg ? oCfg.fixedColumns : [];
+			var sDefaultGroup = this._bundle().getText("listDefaultGroup");
+			var sPopulated = this._bundle().getText("listPopulated");
+			var bShowEmpty = !!this._ui().getProperty("/showEmpty");
+
+			return aRows.map(function (oRow) {
+				var oOut = {
+					objNumber: aFixed[0] ? oRow[aFixed[0].key] : "",
+					objDesc: aFixed[1] ? oRow[aFixed[1].key] : "",
+					objClass: aFixed[2] ? oRow[aFixed[2].key] : "",
+					masterFields: aFixed.slice(3).map(function (f) {
+						return { label: f.label, value: oRow[f.key] || "-" };
+					}),
+					groups: []
+				};
+
+				var oGroupMap = {};
+				var aGroupOrder = [];
+				aChars.forEach(function (oChar) {
+					var oM = mMeta[oChar.CharcInternalID] || {};
+					var sGroup = oM.CharcGroupName || oM.CharcGroup || sDefaultGroup;
+					var oGroup = oGroupMap[sGroup];
+					if (!oGroup) {
+						oGroup = { name: sGroup, charcs: [], populated: 0, total: 0 };
+						oGroupMap[sGroup] = oGroup;
+						aGroupOrder.push(sGroup);
+					}
+					oGroup.total++;
+					var sVal = oRow["C_" + oChar.CharcInternalID] || "";
+					var bPop = sVal !== "";
+					if (bPop) {
+						oGroup.populated++;
+					}
+					// only build the cells that will actually render (big DOM saving)
+					if (bPop || bShowEmpty) {
+						oGroup.charcs.push({
+							label: oChar.Characteristic,
+							value: bPop ? sVal : "-",
+							unit: bPop ? (oM.CharcValueUnit || "") : "",
+							populated: bPop
+						});
+					}
+				});
+
+				oOut.groups = aGroupOrder.map(function (s) {
+					var oGroup = oGroupMap[s];
+					oGroup.countText = oGroup.populated + "/" + oGroup.total + " " + sPopulated;
+					return oGroup;
+				}).filter(function (g) { return g.charcs.length > 0; });
+				return oOut;
+			});
+		},
+
+		_buildListRowsLegacy: function (aRows, aChars, mMeta) {
 			var oCfg = this._pageCtx ? this._pageCtx.oCfg : null;
 			var aFixed = oCfg ? oCfg.fixedColumns : [];
 			var sDefaultGroup = this._bundle().getText("listDefaultGroup");
