@@ -92,6 +92,11 @@ sap.ui.define([
 			});
 			this.getView().setModel(oUI, "ui");
 
+			// Watch every OData model for auth-expiry: when the approuter/xsuaa
+			// session times out the backend returns 401/403 (or an HTML login
+			// redirect) and the services silently stop working. Force a re-login.
+			this._attachAuthGuards();
+
 			// Result-filter state, shared by the in-grid column filters and the
 			// dedicated value-filter fields so the two never overwrite each other.
 			// Keyed by column property -> entered filter string.
@@ -1861,10 +1866,12 @@ sap.ui.define([
 		 * @returns {Promise<object[]>} result rows
 		 */
 		_read: function (oModel, sPath, mUrlParameters) {
+			var that = this;
 			return new Promise(function (resolve, reject) {
 				oModel.read(sPath, {
 					urlParameters: mUrlParameters,
 					success: function (oData) {
+						that._onAuthOk();
 						if (oData && Array.isArray(oData.results)) {
 							resolve(oData.results);
 						} else if (oData) {
@@ -1873,7 +1880,10 @@ sap.ui.define([
 							resolve([]);
 						}
 					},
-					error: reject
+					error: function (oError) {
+						if (that._isAuthError(oError)) { that._forceReauth(); }
+						reject(oError);
+					}
 				});
 			});
 		},
@@ -1883,17 +1893,121 @@ sap.ui.define([
 		/* =========================================================== */
 
 		_readWithCount: function (oModel, sPath, mUrlParameters) {
+			var that = this;
 			return new Promise(function (resolve, reject) {
 				oModel.read(sPath, {
 					urlParameters: mUrlParameters,
 					success: function (oData) {
+						that._onAuthOk();
 						var aResults = (oData && Array.isArray(oData.results)) ? oData.results : (oData ? [oData] : []);
 						var iCount = (oData && oData.__count !== undefined) ? parseInt(oData.__count, 10) : aResults.length;
 						resolve({ results: aResults, count: isNaN(iCount) ? aResults.length : iCount });
 					},
-					error: reject
+					error: function (oError) {
+						if (that._isAuthError(oError)) { that._forceReauth(); }
+						reject(oError);
+					}
 				});
 			});
+		},
+
+		/* =========================================================== */
+		/* auth-expiry handling                                        */
+		/* When the approuter / xsuaa session times out the backend    */
+		/* returns 401/403 (or an HTML login page) on every OData call  */
+		/* and the app silently stops working. We detect that and force */
+		/* a full-page reload, which makes the standalone approuter     */
+		/* redirect through the IdP login and back with a fresh token.  */
+		/* =========================================================== */
+
+		_REAUTH_KEY: "cfaReauthAt",
+
+		// Attach model-level failure listeners so even reads that don't go
+		// through _read/_readWithCount (e.g. metadata, bindings) are covered.
+		_attachAuthGuards: function () {
+			var that = this;
+			["class", "charc", "equipment", "funcloc"].forEach(function (sName) {
+				var oModel = that._model(sName);
+				if (!oModel || oModel.__cfaAuthGuard) { return; }
+				oModel.__cfaAuthGuard = true;
+				var fnFail = function (oEvent) {
+					if (that._isAuthError(oEvent.getParameters ? oEvent.getParameters() : oEvent)) {
+						that._forceReauth();
+					}
+				};
+				if (oModel.attachRequestFailed) { oModel.attachRequestFailed(fnFail); }
+				if (oModel.attachMetadataFailed) { oModel.attachMetadataFailed(fnFail); }
+			});
+		},
+
+		// Recognise an authentication / session-expiry failure from the many
+		// shapes UI5 surfaces (per-read error object vs. event parameters).
+		_isAuthError: function (oErr) {
+			if (!oErr) { return false; }
+			var oResp = oErr.response || oErr;
+			var iStatus = parseInt(oErr.statusCode || oResp.statusCode || oResp.status, 10);
+			if (iStatus === 401 || iStatus === 403) { return true; }
+			// status 0 = redirect to the IdP that the browser blocked from XHR.
+			if (iStatus === 0 && (oErr.statusCode === 0 || oResp.statusCode === 0)) { return true; }
+			// Fallback: the approuter answered with the HTML login page instead
+			// of JSON/XML (happens when the session cookie is gone).
+			var sBody = oErr.responseText || oResp.responseText || oResp.body || "";
+			if (typeof sBody === "string" && sBody) {
+				var sLower = sBody.slice(0, 4000).toLowerCase();
+				if (sLower.indexOf("samlrequest") !== -1 ||
+					sLower.indexOf("j_security_check") !== -1 ||
+					(sLower.indexOf("<html") !== -1 && sLower.indexOf("login") !== -1)) {
+					return true;
+				}
+			}
+			return false;
+		},
+
+		// A successful call proves the session is healthy again — clear the
+		// re-auth guard so the next genuine expiry can trigger a fresh reload.
+		_onAuthOk: function () {
+			try {
+				if (window.sessionStorage) { window.sessionStorage.removeItem(this._REAUTH_KEY); }
+			} catch (e) { /* sessionStorage may be unavailable */ }
+		},
+
+		_forceReauth: function () {
+			// Guard against reload loops: if we already tried to re-auth very
+			// recently and it still failed, the problem isn't a stale session
+			// (e.g. a real 403 authorisation error). Surface a message instead.
+			var iNow = Date.now();
+			var iLast = 0;
+			try {
+				if (window.sessionStorage) {
+					iLast = parseInt(window.sessionStorage.getItem(this._REAUTH_KEY), 10) || 0;
+				}
+			} catch (e) { /* ignore */ }
+
+			if (iLast && (iNow - iLast) < 30000) {
+				// Already reloaded once and it didn't help — stop looping.
+				if (!this._bReauthNotified) {
+					this._bReauthNotified = true;
+					var oUI = this._ui();
+					oUI.setProperty("/tableBusy", false);
+					oUI.setProperty("/classBusy", false);
+					oUI.setProperty("/errorVisible", true);
+					oUI.setProperty("/errorText", this._bundle().getText("sessionExpiredManual"));
+				}
+				return;
+			}
+
+			if (this._bReauthInProgress) { return; }
+			this._bReauthInProgress = true;
+			try {
+				if (window.sessionStorage) { window.sessionStorage.setItem(this._REAUTH_KEY, String(iNow)); }
+			} catch (e) { /* ignore */ }
+
+			try { MessageToast.show(this._bundle().getText("sessionExpiredReloading")); } catch (e) { /* ignore */ }
+
+			// Full-page navigation so the approuter can run its login redirect.
+			window.setTimeout(function () {
+				window.location.reload();
+			}, 800);
 		},
 
 		_ui: function () {
