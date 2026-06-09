@@ -306,6 +306,12 @@ sap.ui.define([
 			var oUI = this._ui();
 			oUI.setProperty("/classIds", []);
 			oUI.setProperty("/multiClass", false);
+			// clear the Class field's own selection + any typed text
+			var oClass = this.byId("classSelect");
+			if (oClass) {
+				if (oClass.setSelectedKeys) { oClass.setSelectedKeys([]); }
+				if (oClass.setValue) { oClass.setValue(""); }
+			}
 			this._resetResults();
 		},
 
@@ -1125,32 +1131,28 @@ sap.ui.define([
 		 * (matched in memory against the keys we already hold) AND characteristic-value
 		 * conditions (resolved server-side), then sort + show page 1.
 		 */
-		/** Clear all filter-bar criteria (object number / characteristic / value). */
+		/** Clear EVERY filter-bar field — tokens, selections, typed-but-uncommitted
+		 *  text and the date control. (Tokens and typed text are independent on a
+		 *  MultiInput, so both must be cleared.) */
 		_clearFilters: function () {
-			var oObj = this.byId("objectSearch");
-			if (oObj) {
-				oObj.removeAllTokens();
-			}
-			var oVal = this.byId("charcValueSearch");
-			if (oVal) {
-				oVal.removeAllTokens();
-			}
-			var oCharc = this.byId("charcSelect");
-			if (oCharc) {
-				oCharc.setSelectedKeys([]);
-			}
-			// header-level text filters (MultiInputs)
-			["serialFilter", "superiorFilter"].forEach(function (sId) {
-				var oCtrl = this.byId(sId);
-				if (oCtrl && oCtrl.removeAllTokens) {
-					oCtrl.removeAllTokens();
-				}
-			}, this);
-			// Planner Group (MultiComboBox)
-			var oPlanner = this.byId("plannerFilter");
-			if (oPlanner && oPlanner.setSelectedKeys) {
-				oPlanner.setSelectedKeys([]);
-			}
+			var that = this;
+
+			// MultiInput fields: committed tokens AND typed-but-uncommitted text
+			["objectSearch", "charcValueSearch", "serialFilter", "superiorFilter"].forEach(function (sId) {
+				var oCtrl = that.byId(sId);
+				if (!oCtrl) { return; }
+				if (oCtrl.removeAllTokens) { oCtrl.removeAllTokens(); }
+				if (oCtrl.setValue) { oCtrl.setValue(""); }
+			});
+
+			// MultiComboBox dropdowns: selection AND any typed text
+			["charcSelect", "plannerFilter"].forEach(function (sId) {
+				var oCtrl = that.byId(sId);
+				if (!oCtrl) { return; }
+				if (oCtrl.setSelectedKeys) { oCtrl.setSelectedKeys([]); }
+				if (oCtrl.setValue) { oCtrl.setValue(""); }
+			});
+
 			// Start-Up Date (DynamicDateRange)
 			var oStartUp = this.byId("startupFilter");
 			if (oStartUp && oStartUp.setValue) {
