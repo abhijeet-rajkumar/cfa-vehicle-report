@@ -81,6 +81,8 @@
 									id="charcSelect"
 									width="100%"
 									placeholder="{i18n>charcPlaceholder}"
+									busy="{ui>/charcBusy}"
+									busyIndicatorDelay="0"
 									items="{ path: 'ui>/charcOptions', templateShareable: false }">
 									<core:Item key="{ui>key}" text="{ui>text}" />
 								</MultiComboBox>

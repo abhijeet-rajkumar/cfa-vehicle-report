@@ -98,8 +98,9 @@ sap.ui.define([
 				showEmpty: false,
 				listRows: [],
 
-				// characteristic filter options (populated from the loaded class)
+				// characteristic filter options (populated when a class is selected)
 				charcOptions: [],
+				charcBusy: false,
 
 				// sorting (mirrored from the page context for the list-view buttons)
 				sortFields: [],
@@ -224,6 +225,7 @@ sap.ui.define([
 			oUI.setProperty("/multiClass", false);
 			oUI.setProperty("/classes", []);
 			oUI.setProperty("/classSelectEnabled", false);
+			this._unionCache = null; // characteristic union belongs to the old type
 
 			// Reset the result area back to the initial empty state.
 			this._resetResults();
@@ -231,7 +233,7 @@ sap.ui.define([
 			this._loadClasses(sClassType);
 		},
 
-		onClassChange: function () {
+		onClassChange: async function () {
 			var aIds = this.byId("classSelect").getSelectedKeys();
 			var oUI = this._ui();
 			var bMulti = aIds.length > 1;
@@ -239,11 +241,39 @@ sap.ui.define([
 			if (bMulti) {
 				oUI.setProperty("/viewMode", "list");
 			}
-			// the characteristic filter belongs to the previous class set
-			oUI.setProperty("/charcOptions", []);
+
+			// the characteristic filter belongs to the previous class set — reset it
 			var oCharc = this.byId("charcSelect");
 			if (oCharc) {
 				oCharc.setSelectedKeys([]);
+			}
+			oUI.setProperty("/charcOptions", []);
+
+			// nothing selected -> dependent filters cleared, done
+			if (!aIds.length) {
+				oUI.setProperty("/charcBusy", false);
+				return;
+			}
+
+			// Build the dependent Characteristic filter for the selected class(es)
+			// immediately, without waiting for Go. A token guards against the rapid
+			// selectionChange events fired while ticking several classes.
+			var iToken = (this._charcLoadToken = (this._charcLoadToken || 0) + 1);
+			oUI.setProperty("/charcBusy", true);
+			try {
+				var oUnion = await this._fetchUnionCharacteristics(aIds);
+				if (iToken !== this._charcLoadToken) {
+					return; // superseded by a newer selection
+				}
+				oUI.setProperty("/charcOptions", oUnion.chars.map(function (oChar) {
+					return { key: oChar.CharcInternalID, text: oChar.Characteristic };
+				}));
+			} catch (oError) {
+				// non-fatal: leave the characteristic options empty
+			} finally {
+				if (iToken === this._charcLoadToken) {
+					oUI.setProperty("/charcBusy", false);
+				}
 			}
 		},
 
@@ -712,6 +742,12 @@ sap.ui.define([
 		 */
 		_fetchUnionCharacteristics: async function (aClassIds) {
 			var that = this;
+			// memoise on the class-id set so selecting a class (which builds the
+			// Characteristic filter) and then pressing Go don't fetch twice
+			var sKey = aClassIds.slice().sort().join(",");
+			if (this._unionCache && this._unionCache.key === sKey) {
+				return this._unionCache.value;
+			}
 			var aPerClass = await Promise.all(aClassIds.map(function (sId) {
 				return that._fetchCharacteristics(sId);
 			}));
@@ -726,7 +762,8 @@ sap.ui.define([
 				});
 			});
 			var mMeta = await this._fetchCharcMetadata(aUnion);
-			return { chars: aUnion, meta: mMeta };
+			this._unionCache = { key: sKey, value: { chars: aUnion, meta: mMeta } };
+			return this._unionCache.value;
 		},
 
 		/** Prompt the user to pick a class when an object is in several. */
@@ -930,8 +967,10 @@ sap.ui.define([
 				return;
 			}
 
-			// class set changed -> clear the (now stale) filters and reload
-			this._clearFilters();
+			// NOTE: filters are intentionally NOT cleared here. Users now set filters
+			// (characteristic, value, object number, ...) against the selected class
+			// before pressing Go; onClassChange already reset the characteristic
+			// selection when the class changed, so nothing stale remains.
 
 			oUI.setProperty("/showEmptyState", false);
 			oUI.setProperty("/showNoData", false);
@@ -2378,6 +2417,8 @@ sap.ui.define([
 			oUI.setProperty("/filterInfo", "");
 			this._clearFilters();
 			oUI.setProperty("/charcOptions", []);
+			oUI.setProperty("/charcBusy", false);
+			this._unionCache = null;
 
 			// drop page-local search state
 			this._resultFilters = {};
