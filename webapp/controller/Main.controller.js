@@ -101,6 +101,8 @@ sap.ui.define([
 				// characteristic filter options (populated when a class is selected)
 				charcOptions: [],
 				charcBusy: false,
+				// planner-group filter options (populated from the loaded class objects)
+				plannerOptions: [],
 
 				// sorting (mirrored from the page context for the list-view buttons)
 				sortFields: [],
@@ -246,6 +248,12 @@ sap.ui.define([
 				oCharc.setSelectedKeys([]);
 			}
 			oUI.setProperty("/charcOptions", []);
+			// the planner-group options come from the previous class's objects — reset
+			var oPlanner = this.byId("plannerFilter");
+			if (oPlanner && oPlanner.setSelectedKeys) {
+				oPlanner.setSelectedKeys([]);
+			}
+			oUI.setProperty("/plannerOptions", []);
 
 			// nothing selected -> dependent filters cleared, done
 			if (!aIds.length) {
@@ -448,9 +456,6 @@ sap.ui.define([
 		},
 		onSuperiorValueHelp: function (oEvent) {
 			this._openRangesVHD(oEvent.getSource(), this._bundle().getText("filterSuperior"), "string");
-		},
-		onPlannerValueHelp: function (oEvent) {
-			this._openRangesVHD(oEvent.getSource(), this._bundle().getText("filterPlanner"), "string");
 		},
 
 		/**
@@ -1014,6 +1019,9 @@ sap.ui.define([
 				oUI.setProperty("/charcOptions", oUnion.chars.map(function (oChar) {
 					return { key: oChar.CharcInternalID, text: oChar.Characteristic };
 				}));
+				// Planner Group filter options: the distinct planner groups actually
+				// present in the loaded class(es), so the dropdown only offers real values.
+				oUI.setProperty("/plannerOptions", this._distinctHeaderValues(mHeaders, aAllKeys, "MaintenancePlannerGroup"));
 				oUI.setProperty("/multiClass", bMulti);
 				if (bMulti) {
 					oUI.setProperty("/viewMode", "list");
@@ -1113,12 +1121,17 @@ sap.ui.define([
 				oCharc.setSelectedKeys([]);
 			}
 			// header-level text filters (MultiInputs)
-			["serialFilter", "superiorFilter", "plannerFilter"].forEach(function (sId) {
+			["serialFilter", "superiorFilter"].forEach(function (sId) {
 				var oCtrl = this.byId(sId);
 				if (oCtrl && oCtrl.removeAllTokens) {
 					oCtrl.removeAllTokens();
 				}
 			}, this);
+			// Planner Group (MultiComboBox)
+			var oPlanner = this.byId("plannerFilter");
+			if (oPlanner && oPlanner.setSelectedKeys) {
+				oPlanner.setSelectedKeys([]);
+			}
 			// Start-Up Date (DynamicDateRange)
 			var oStartUp = this.byId("startupFilter");
 			if (oStartUp && oStartUp.setValue) {
@@ -1256,7 +1269,19 @@ sap.ui.define([
 
 			aKeys = textTokenFilter(aKeys, "serialFilter", "ManufacturerSerialNumber");
 			aKeys = textTokenFilter(aKeys, "superiorFilter", "SuperiorObject");
-			aKeys = textTokenFilter(aKeys, "plannerFilter", "MaintenancePlannerGroup");
+
+			// Planner Group — multi-select dropdown; keep objects whose planner group
+			// is any of the selected codes (exact match)
+			var oPlanner = this.byId("plannerFilter");
+			var aPlanner = (oPlanner && oPlanner.getSelectedKeys) ? oPlanner.getSelectedKeys() : [];
+			if (aPlanner.length) {
+				var oPlannerSet = {};
+				aPlanner.forEach(function (k) { oPlannerSet[k] = true; });
+				aKeys = aKeys.filter(function (sKey) {
+					var v = (mVals[sKey] && mVals[sKey].MaintenancePlannerGroup) || "";
+					return oPlannerSet[v];
+				});
+			}
 
 			// Start-Up Date — sap.m.DynamicDateRange (Today / Last X days / range / ...)
 			var oDDR = this.byId("startupFilter");
@@ -1280,6 +1305,21 @@ sap.ui.define([
 			}
 
 			return aKeys;
+		},
+
+		/** Distinct, sorted, non-empty values of a header field across the keys,
+		 *  shaped as { key, text } options for a dropdown. */
+		_distinctHeaderValues: function (mHeaders, aKeys, sField) {
+			var oSeen = {};
+			(aKeys || []).forEach(function (k) {
+				var v = mHeaders[k] && mHeaders[k][sField];
+				if (v !== undefined && v !== null && v !== "") {
+					oSeen[v] = true;
+				}
+			});
+			return Object.keys(oSeen).sort().map(function (v) {
+				return { key: v, text: v };
+			});
 		},
 
 		/** Floor an epoch to the start of its calendar day (local time). */
@@ -2416,6 +2456,7 @@ sap.ui.define([
 			this._clearFilters();
 			oUI.setProperty("/charcOptions", []);
 			oUI.setProperty("/charcBusy", false);
+			oUI.setProperty("/plannerOptions", []);
 			this._unionCache = null;
 
 			// drop page-local search state
