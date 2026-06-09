@@ -201,9 +201,7 @@ sap.ui.define([
 						{ key: "objNumber", label: oBundle.getText("colFuncLoc"), width: "14rem", get: function (sKey) { return sKey; } },
 						{ key: "objDesc", label: oBundle.getText("colDescription"), width: "18rem", get: function (sKey, oHeader) { return oHeader.FunctionalLocationName; } },
 						{ key: "objClass", label: oBundle.getText("colClass"), width: "11rem", get: function (sKey, oHeader, oRow, oCtx) { return (oCtx.classByKey && oCtx.classByKey[sKey] && oCtx.classByKey[sKey].Class) || oCtx.className; } },
-						{ key: "ManufacturerSerialNumber", label: oBundle.getText("colSerialNo"), width: "12rem", get: function (sKey, oHeader) { return oHeader.ManufacturerSerialNumber; } },
 						{ key: "SuperiorObject", label: oBundle.getText("colSuperiorObj"), width: "16rem", get: function (sKey, oHeader) { return oHeader.SuperiorFunctionalLocation; } },
-						{ key: "OperationStartDate", label: oBundle.getText("colStartUp"), width: "10rem", get: function (sKey, oHeader) { return fmtSAPDate(oHeader.OperationStartDate); } },
 						{ key: "MaintenancePlannerGroup", label: oBundle.getText("colPlannerGroup"), width: "9rem", get: function (sKey, oHeader) { return oHeader.MaintenancePlannerGroup; } },
 						{ key: "FunctionalLocationCategory", label: oBundle.getText("colCategory"), width: "8rem", get: function (sKey, oHeader) { return oHeader.FunctionalLocationCategory; } }
 					]

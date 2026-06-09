@@ -98,7 +98,7 @@
 									valueHelpRequest="onCharcValueValueHelp" />
 							</fb:control>
 						</fb:FilterGroupItem>
-						<fb:FilterGroupItem name="serial" label="{i18n>filterSerial}" groupName="main" visibleInFilterBar="true">
+						<fb:FilterGroupItem name="serial" label="{i18n>filterSerial}" groupName="main" visibleInFilterBar="{= ${ui&gt;/classType} === '002' }">
 							<fb:control>
 								<MultiInput id="serialFilter" width="100%" placeholder="{i18n>filterSerialPlaceholder}" showValueHelp="true" valueHelpRequest="onSerialValueHelp" />
 							</fb:control>
@@ -113,7 +113,7 @@
 								<MultiInput id="plannerFilter" width="100%" placeholder="{i18n>filterPlannerPlaceholder}" showValueHelp="true" valueHelpRequest="onPlannerValueHelp" />
 							</fb:control>
 						</fb:FilterGroupItem>
-						<fb:FilterGroupItem name="startup" label="{i18n>filterStartUp}" groupName="main" visibleInFilterBar="true">
+						<fb:FilterGroupItem name="startup" label="{i18n>filterStartUp}" groupName="main" visibleInFilterBar="{= ${ui&gt;/classType} === '002' }">
 							<fb:control>
 								<DynamicDateRange id="startupFilter" width="100%" />
 							</fb:control>
