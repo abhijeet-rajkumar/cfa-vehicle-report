@@ -163,7 +163,7 @@ sap.ui.define([
 					// header read separately ($expand on the value view dumps on the DB).
 					// Equipment is time-dependent (key includes ValidityEndDate).
 					headerSet: "/Equipment",
-					headerSelect: "Equipment,EquipmentName,MaintenancePlant,ValidityEndDate,ManufacturerSerialNumber,OperationStartDate,MaintenancePlannerGroup,FunctionalLocationLabelName,SuperordinateEquipment",
+					headerSelect: "Equipment,EquipmentName,MaintenancePlant,ValidityEndDate,ManufacturerSerialNumber,OperationStartDate,MaintenancePlannerGroup,FunctionalLocationLabelName,FunctionalLocationName,SuperordinateEquipment",
 					headerHasValidity: true,
 					// raw header field used by the Start-Up Date range filter
 					dateFilterField: "OperationStartDate",
@@ -172,13 +172,17 @@ sap.ui.define([
 					// single-call header fetch: expand the class->object navigation so
 					// one request returns every object's header data for the class.
 					headerExpandNav: "to_Equipment",
-					headerExpandSelect: "Equipment,to_Equipment/Equipment,to_Equipment/EquipmentName,to_Equipment/MaintenancePlant,to_Equipment/ValidityEndDate,to_Equipment/ManufacturerSerialNumber,to_Equipment/OperationStartDate,to_Equipment/MaintenancePlannerGroup,to_Equipment/FunctionalLocationLabelName,to_Equipment/SuperordinateEquipment",
+					headerExpandSelect: "Equipment,to_Equipment/Equipment,to_Equipment/EquipmentName,to_Equipment/MaintenancePlant,to_Equipment/ValidityEndDate,to_Equipment/ManufacturerSerialNumber,to_Equipment/OperationStartDate,to_Equipment/MaintenancePlannerGroup,to_Equipment/FunctionalLocationLabelName,to_Equipment/FunctionalLocationName,to_Equipment/SuperordinateEquipment",
 					fixedColumns: [
 						{ key: "objNumber", label: oBundle.getText("colEquipment"), width: "11rem", get: function (sKey) { return sKey; } },
 						{ key: "objDesc", label: oBundle.getText("colDescription"), width: "18rem", get: function (sKey, oHeader) { return oHeader.EquipmentName; } },
 						{ key: "objClass", label: oBundle.getText("colClass"), width: "11rem", get: function (sKey, oHeader, oRow, oCtx) { return (oCtx.classByKey && oCtx.classByKey[sKey] && oCtx.classByKey[sKey].Class) || oCtx.className; } },
 						{ key: "ManufacturerSerialNumber", label: oBundle.getText("colSerialNo"), width: "12rem", get: function (sKey, oHeader) { return oHeader.ManufacturerSerialNumber; } },
-						{ key: "SuperiorObject", label: oBundle.getText("colSuperiorObj"), width: "16rem", get: function (sKey, oHeader) { return oHeader.FunctionalLocationLabelName || oHeader.SuperordinateEquipment; } },
+						{ key: "SuperiorObject", label: oBundle.getText("colSuperiorObj"), width: "20rem", get: function (sKey, oHeader) {
+							var sLabel = oHeader.FunctionalLocationLabelName || oHeader.SuperordinateEquipment || "";
+							var sName = oHeader.FunctionalLocationName || "";
+							return (sLabel && sName) ? (sLabel + " (" + sName + ")") : sLabel;
+						} },
 						{ key: "OperationStartDate", label: oBundle.getText("colStartUp"), width: "10rem", get: function (sKey, oHeader) { return fmtSAPDate(oHeader.OperationStartDate); } },
 						{ key: "MaintenancePlannerGroup", label: oBundle.getText("colPlannerGroup"), width: "9rem", get: function (sKey, oHeader) { return oHeader.MaintenancePlannerGroup; } },
 						{ key: "MaintenancePlant", label: oBundle.getText("colMaintPlant"), width: "9rem", get: function (sKey, oHeader) { return oHeader.MaintenancePlant; } }
@@ -445,33 +449,23 @@ sap.ui.define([
 			this._oObjectVHD.close();
 		},
 
-		/** Value Help for the characteristic value filter (conditions tab). */
+		/** Value Help for the characteristic value filter (conditions tab). When a
+		 *  single DATE characteristic is selected the dialog uses date pickers so the
+		 *  user enters real dates rather than free text. */
 		onCharcValueValueHelp: function (oEvent) {
-			var oMultiInput = oEvent.getSource();
-			if (!this._oValueVHD) {
-				this._oValueVHD = new ValueHelpDialog({
-					title: this._bundle().getText("charcValueVHDTitle"),
-					supportRanges: true,
-					supportRangesOnly: true,
-					key: "charcValue",
-					ok: this._onValueVHDOk.bind(this),
-					cancel: function () { this._oValueVHD.close(); }.bind(this),
-					afterClose: function () { if (this._oValueVHD) { this._oValueVHD.destroy(); this._oValueVHD = null; } }.bind(this)
-				});
-				this.getView().addDependent(this._oValueVHD);
-				this._oValueVHD.setRangeKeyFields([{
-					key: "charcValue",
-					label: this._bundle().getText("filterCharcValue"),
-					type: "string"
-				}]);
-			}
-			this._oValueVHD.setTokens(oMultiInput.getTokens());
-			this._oValueVHD.open();
+			this._openRangesVHD(oEvent.getSource(), this._bundle().getText("charcValueVHDTitle"), this._charcValueVHDType());
 		},
 
-		_onValueVHDOk: function (oEvent) {
-			this.byId("charcValueSearch").setTokens(oEvent.getParameter("tokens"));
-			this._oValueVHD.close();
+		/** Range-field type for the characteristic-value value help, based on the
+		 *  selected characteristic's data type ("date" for DATE, else "string"). */
+		_charcValueVHDType: function () {
+			var oSel = this.byId("charcSelect");
+			var aIds = oSel ? oSel.getSelectedKeys() : [];
+			if (aIds.length !== 1) { return "string"; }
+			var mMeta = (this._pageCtx && this._pageCtx.mMeta) ||
+				(this._unionCache && this._unionCache.value && this._unionCache.value.meta) || {};
+			var oM = mMeta[aIds[0]];
+			return (oM && oM.CharcDataType === "DATE") ? "date" : "string";
 		},
 
 		/* ---- header-field value helps (serial / superior / planner / start-up) ---- */
@@ -1360,16 +1354,31 @@ sap.ui.define([
 			var oCfg = ctx.oCfg;
 			var sKeyField = oCfg.objectKeyField;
 			var oModel = this._model(oCfg.modelName);
+			var mMeta = ctx.mMeta || {};
 
-			var sCharcClause = aCharcIds.length
-				? " and (" + aCharcIds.map(function (id) {
-					return oCfg.charcIdField + " eq '" + that._esc(id) + "'";
-				}).join(" or ") + ")"
-				: "";
+			// Build one server query per (characteristic, condition). When a
+			// characteristic is selected we know its data type, so numeric/date/
+			// currency conditions filter the TYPED field (CharcFromNumericValue /
+			// CharcFromDate / CharcFromAmount) numerically instead of string-matching
+			// CharcValue. With no characteristic selected we can't know the type, so
+			// we fall back to the CharcValue string match across any characteristic.
+			var aSpecs = [];
+			if (aCharcIds.length) {
+				aCharcIds.forEach(function (sCharcId) {
+					var sType = (mMeta[sCharcId] && mMeta[sCharcId].CharcDataType) || "CHAR";
+					aValConds.forEach(function (oCond) {
+						aSpecs.push(oCfg.charcIdField + " eq '" + that._esc(sCharcId) + "' and (" + that._typedValueFilter(oCond, sType) + ")");
+					});
+				});
+			} else {
+				aValConds.forEach(function (oCond) {
+					aSpecs.push(that._valueConditionFilter(oCond));
+				});
+			}
 
-			var aSets = await Promise.all(aValConds.map(function (oCond) {
+			var aSets = await Promise.all(aSpecs.map(function (sFilter) {
 				return that._read(oModel, oCfg.valueSet, {
-					"$filter": that._valueConditionFilter(oCond) + sCharcClause,
+					"$filter": sFilter,
 					"$select": sKeyField + ",ClassInternalID",
 					"$top": MAX_VALUE_ROWS
 				}).then(function (aRows) {
@@ -1391,7 +1400,88 @@ sap.ui.define([
 			return oUnion;
 		},
 
-		/** Build a CharcValue OData clause for a value condition. */
+		/** Build the server filter for a value condition against the right field for
+		 *  the characteristic's data type. Falls back to a CharcValue string match. */
+		_typedValueFilter: function (oCond, sType) {
+			var sTyped = null;
+			if (sType === "NUM") {
+				sTyped = this._numericFilter("CharcFromNumericValue", oCond);
+			} else if (sType === "CURR") {
+				sTyped = this._numericFilter("CharcFromAmount", oCond);
+			} else if (sType === "DATE") {
+				sTyped = this._dateFilter("CharcFromDate", oCond);
+			}
+			return sTyped || this._valueConditionFilter(oCond);
+		},
+
+		/** Numeric OData clause (Edm.Double/Decimal accept plain number literals). */
+		_numericFilter: function (sField, oCond) {
+			var n1 = parseFloat(oCond.value1);
+			if (isNaN(n1)) { return null; } // not a number -> let caller fall back
+			var n2 = parseFloat(oCond.value2);
+			switch (oCond.operation) {
+				case "EQ": return sField + " eq " + n1;
+				case "GT": return sField + " gt " + n1;
+				case "GE": return sField + " ge " + n1;
+				case "LT": return sField + " lt " + n1;
+				case "LE": return sField + " le " + n1;
+				case "BT": return "(" + sField + " ge " + n1 + " and " + sField + " le " + (isNaN(n2) ? n1 : n2) + ")";
+				default: return sField + " eq " + n1; // typed/contains on a number -> equals
+			}
+		},
+
+		/** Date OData clause against an Edm.DateTime field (datetime'...' literals,
+		 *  matched at day granularity). */
+		_dateFilter: function (sField, oCond) {
+			var d1 = this._parseFilterDate(oCond.value1);
+			if (!d1) { return null; }
+			var that = this;
+			var dayAfter = function (d) { var x = new Date(d.getTime()); x.setDate(x.getDate() + 1); return x; };
+			switch (oCond.operation) {
+				case "EQ":
+					return "(" + sField + " ge " + that._odataDateLit(d1) + " and " + sField + " lt " + that._odataDateLit(dayAfter(d1)) + ")";
+				case "GT": return sField + " ge " + that._odataDateLit(dayAfter(d1));
+				case "GE": return sField + " ge " + that._odataDateLit(d1);
+				case "LT": return sField + " lt " + that._odataDateLit(d1);
+				case "LE": return sField + " lt " + that._odataDateLit(dayAfter(d1));
+				case "BT":
+					var d2 = this._parseFilterDate(oCond.value2) || d1;
+					return "(" + sField + " ge " + that._odataDateLit(d1) + " and " + sField + " lt " + that._odataDateLit(dayAfter(d2)) + ")";
+				default:
+					return "(" + sField + " ge " + that._odataDateLit(d1) + " and " + sField + " lt " + that._odataDateLit(dayAfter(d1)) + ")";
+			}
+		},
+
+		/** Tolerant parse of a user-entered or VHD-supplied date -> Date, or null.
+		 *  Day-first (Australian) for d/m/y; ISO and month-name forms also handled. */
+		_parseFilterDate: function (v) {
+			if (v === undefined || v === null || v === "") { return null; }
+			if (v instanceof Date) { return v; }
+			var s = String(v).trim();
+			var m = /\/Date\((-?\d+)/.exec(s);
+			if (m) { return new Date(parseInt(m[1], 10)); }
+			// dd/mm/yyyy, dd.mm.yyyy, dd-mm-yyyy (day first)
+			m = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/.exec(s);
+			if (m) {
+				var dd = parseInt(m[1], 10), mm = parseInt(m[2], 10), yy = parseInt(m[3], 10);
+				if (yy < 100) { yy += 2000; }
+				if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) { return new Date(yy, mm - 1, dd); }
+			}
+			// ISO yyyy-mm-dd
+			m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+			if (m) { return new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10)); }
+			// fallback: native parse handles "Jan 1, 1992", "1 Jan 1992", etc.
+			var t = Date.parse(s);
+			return isNaN(t) ? null : new Date(t);
+		},
+
+		/** Format a Date as an OData V2 datetime literal at midnight (local day). */
+		_odataDateLit: function (d) {
+			var p = function (n) { return (n < 10 ? "0" : "") + n; };
+			return "datetime'" + d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "T00:00:00'";
+		},
+
+		/** Build a CharcValue (string) OData clause for a value condition. */
 		_valueConditionFilter: function (oCond) {
 			var v1 = this._esc(oCond.value1);
 			var v2 = this._esc(oCond.value2);
@@ -1967,17 +2057,17 @@ sap.ui.define([
 			switch (sType) {
 				case "NUM":
 					if (this._has(oRow.CharcFromNumericValue)) {
-						return this._trimDecimal(oRow.CharcFromNumericValue);
+						return this._numStr(oRow.CharcFromNumericValue);
 					}
 					if (this._has(oRow.CharcFromDecimalValue)) {
-						return this._trimDecimal(oRow.CharcFromDecimalValue);
+						return this._numStr(oRow.CharcFromDecimalValue);
 					}
 					return this._str(oRow.CharcValue);
 				case "DATE":
 					return this._formatDate(oRow.CharcFromDate) || this._str(oRow.CharcValue);
 				case "CURR":
 					if (this._has(oRow.CharcFromAmount)) {
-						var sAmount = this._trimDecimal(oRow.CharcFromAmount);
+						var sAmount = this._numStr(oRow.CharcFromAmount);
 						return oRow.Currency ? (sAmount + " " + oRow.Currency) : sAmount;
 					}
 					return this._str(oRow.CharcValue);
@@ -2454,6 +2544,19 @@ sap.ui.define([
 				return s;
 			}
 			return s.replace(/0+$/, "").replace(/\.$/, "");
+		},
+
+		/**
+		 * Format a numeric value for display. SAP returns NUM characteristic values
+		 * as Edm.Double, often in exponential form (e.g. "1.0E+00"), which the naive
+		 * decimal-trim mangles to "1.0E". Parse it as a real number instead.
+		 */
+		_numStr: function (v) {
+			if (!this._has(v)) {
+				return "";
+			}
+			var n = parseFloat(v);
+			return isNaN(n) ? this._str(v) : String(n);
 		},
 
 		_epoch: function (v) {
