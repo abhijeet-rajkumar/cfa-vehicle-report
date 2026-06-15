@@ -1372,7 +1372,20 @@ sap.ui.define([
 				});
 			} else {
 				aValConds.forEach(function (oCond) {
-					aSpecs.push(that._valueConditionFilter(oCond));
+					// No characteristic selected, so the data type is unknown. For a
+					// date-looking value, SAP stores DATE characteristics in the typed
+					// CharcFromDate field (not as a DD/MM/YYYY string in CharcValue), so
+					// a CharcValue substring match never hits. Query CharcFromDate, OR'd
+					// with the CharcValue string variants for CHAR characteristics that
+					// hold a date as text.
+					var sDateClause = that._dateSeparatorVariants(oCond.value1)
+						? that._dateFilter("CharcFromDate", oCond)
+						: null;
+					if (sDateClause) {
+						aSpecs.push("((" + sDateClause + ") or (" + that._valueConditionFilter(oCond) + "))");
+					} else {
+						aSpecs.push(that._valueConditionFilter(oCond));
+					}
 				});
 			}
 
