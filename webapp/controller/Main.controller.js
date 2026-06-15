@@ -21,10 +21,11 @@ sap.ui.define([
 	"sap/m/ViewSettingsItem",
 	"sap/ui/comp/valuehelpdialog/ValueHelpDialog",
 	"sap/m/DynamicDateRange",
+	"sap/m/DynamicDateUtil",
 	"sap/ui/core/format/DateFormat",
 	"sap/ui/export/Spreadsheet",
 	"sap/ui/export/library"
-], function (Controller, JSONModel, Sorter, Filter, FilterOperator, TableColumn, tableLibrary, FilterGroupItem, Input, Text, Label, MessageToast, Dialog, List, StandardListItem, Button, ProgressIndicator, VBox, ViewSettingsDialog, ViewSettingsItem, ValueHelpDialog, DynamicDateRange, DateFormat, Spreadsheet, exportLibrary) {
+], function (Controller, JSONModel, Sorter, Filter, FilterOperator, TableColumn, tableLibrary, FilterGroupItem, Input, Text, Label, MessageToast, Dialog, List, StandardListItem, Button, ProgressIndicator, VBox, ViewSettingsDialog, ViewSettingsItem, ValueHelpDialog, DynamicDateRange, DynamicDateUtil, DateFormat, Spreadsheet, exportLibrary) {
 	"use strict";
 
 	var SortOrder = tableLibrary.SortOrder;
@@ -1302,7 +1303,19 @@ sap.ui.define([
 			var oDDR = this.byId("startupFilter");
 			var oDDRValue = (oDDR && oDDR.getValue) ? oDDR.getValue() : null;
 			if (oDDRValue) {
-				var aBounds = DynamicDateRange.toDates(oDDRValue);
+				// DynamicDateRange.toDates was deprecated (1.118) and is unavailable in
+				// newer UI5; DynamicDateUtil.toDates is the supported helper. Fall back to
+				// the old static method, and never let a date-filter issue abort the load.
+				var aBounds = null;
+				try {
+					if (DynamicDateUtil && DynamicDateUtil.toDates) {
+						aBounds = DynamicDateUtil.toDates(oDDRValue);
+					} else if (DynamicDateRange && DynamicDateRange.toDates) {
+						aBounds = DynamicDateRange.toDates(oDDRValue);
+					}
+				} catch (e) {
+					aBounds = null;
+				}
 				if (aBounds && aBounds.length) {
 					var ms = function (d) { return d.getJSDate ? d.getJSDate().getTime() : d.getTime(); };
 					var nFromDay = this._dayFloor(ms(aBounds[0]));
