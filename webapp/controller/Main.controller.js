@@ -1372,17 +1372,17 @@ sap.ui.define([
 				});
 			} else {
 				aValConds.forEach(function (oCond) {
-					// No characteristic selected, so the data type is unknown. For a
-					// date-looking value, SAP stores DATE characteristics in the typed
-					// CharcFromDate field (not as a DD/MM/YYYY string in CharcValue), so
-					// a CharcValue substring match never hits. Query CharcFromDate, OR'd
-					// with the CharcValue string variants for CHAR characteristics that
-					// hold a date as text.
-					var sDateClause = that._dateSeparatorVariants(oCond.value1)
+					// No characteristic selected, so the data type is unknown. A value
+					// entered as a date (DD/MM/YYYY or DD.MM.YYYY) is only meaningful for
+					// DATE characteristics, where the date lives in the typed CharcFromDate
+					// field (CharcValue is empty). So restrict the search to DATE
+					// characteristics and match CharcFromDate. Any other value is a plain
+					// CharcValue substring match across every characteristic.
+					var sDateClause = that._isDateValue(oCond.value1)
 						? that._dateFilter("CharcFromDate", oCond)
 						: null;
 					if (sDateClause) {
-						aSpecs.push("((" + sDateClause + ") or (" + that._valueConditionFilter(oCond) + "))");
+						aSpecs.push("CharcDataType eq 'DATE' and (" + sDateClause + ")");
 					} else {
 						aSpecs.push(that._valueConditionFilter(oCond));
 					}
@@ -1494,45 +1494,27 @@ sap.ui.define([
 			return "datetime'" + d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "T00:00:00'";
 		},
 
-		/** If the value is a day-first date (dd/mm/yyyy, dd.mm.yyyy or dd-mm-yyyy),
-		 *  return the same date rendered with each common separator; otherwise null.
-		 *  Used so a date typed in any separator matches however SAP stored the string
-		 *  CharcValue (e.g. typed 15.06.2026 still matches a stored 15/06/2026). */
-		_dateSeparatorVariants: function (v) {
-			if (v === undefined || v === null) { return null; }
-			var m = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/.exec(String(v).trim());
-			if (!m) { return null; }
-			var dd = m[1], mm = m[2], yy = m[3];
-			return ["/", ".", "-"].map(function (sep) { return dd + sep + mm + sep + yy; });
+		/** True when the value is a day-first date (dd/mm/yyyy, dd.mm.yyyy or
+		 *  dd-mm-yyyy). Such a value is only meaningful for DATE characteristics, so
+		 *  the caller searches CharcFromDate rather than substring-matching CharcValue. */
+		_isDateValue: function (v) {
+			if (v === undefined || v === null) { return false; }
+			return (/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/).test(String(v).trim());
 		},
 
 		/** Build a CharcValue (string) OData clause for a value condition. */
 		_valueConditionFilter: function (oCond) {
-			var that = this;
 			var v1 = this._esc(oCond.value1);
 			var v2 = this._esc(oCond.value2);
-			// Equality / contains on a date typed in the free-text field: match every
-			// separator variant so the format the user typed need not match the one
-			// stored in CharcValue. Comparison/range ops keep the literal value.
-			var aVariants = this._dateSeparatorVariants(oCond.value1);
-			var orOver = function (fnClause) {
-				return "(" + aVariants.map(function (s) { return fnClause(that._esc(s)); }).join(" or ") + ")";
-			};
 			switch (oCond.operation) {
-				case "EQ": return aVariants
-					? orOver(function (v) { return "CharcValue eq '" + v + "'"; })
-					: "CharcValue eq '" + v1 + "'";
-				case "StartsWith": return aVariants
-					? orOver(function (v) { return "startswith(CharcValue,'" + v + "')"; })
-					: "startswith(CharcValue,'" + v1 + "')";
+				case "EQ": return "CharcValue eq '" + v1 + "'";
+				case "StartsWith": return "startswith(CharcValue,'" + v1 + "')";
 				case "BT": return "(CharcValue ge '" + v1 + "' and CharcValue le '" + v2 + "')";
 				case "GT": return "CharcValue gt '" + v1 + "'";
 				case "GE": return "CharcValue ge '" + v1 + "'";
 				case "LT": return "CharcValue lt '" + v1 + "'";
 				case "LE": return "CharcValue le '" + v1 + "'";
-				default: return aVariants
-					? orOver(function (v) { return "substringof('" + v + "',CharcValue)"; })
-					: "substringof('" + v1 + "',CharcValue)";
+				default: return "substringof('" + v1 + "',CharcValue)";
 			}
 		},
 
