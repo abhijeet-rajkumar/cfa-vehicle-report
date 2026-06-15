@@ -21,11 +21,10 @@ sap.ui.define([
 	"sap/m/ViewSettingsItem",
 	"sap/ui/comp/valuehelpdialog/ValueHelpDialog",
 	"sap/m/DynamicDateRange",
-	"sap/m/DynamicDateUtil",
 	"sap/ui/core/format/DateFormat",
 	"sap/ui/export/Spreadsheet",
 	"sap/ui/export/library"
-], function (Controller, JSONModel, Sorter, Filter, FilterOperator, TableColumn, tableLibrary, FilterGroupItem, Input, Text, Label, MessageToast, Dialog, List, StandardListItem, Button, ProgressIndicator, VBox, ViewSettingsDialog, ViewSettingsItem, ValueHelpDialog, DynamicDateRange, DynamicDateUtil, DateFormat, Spreadsheet, exportLibrary) {
+], function (Controller, JSONModel, Sorter, Filter, FilterOperator, TableColumn, tableLibrary, FilterGroupItem, Input, Text, Label, MessageToast, Dialog, List, StandardListItem, Button, ProgressIndicator, VBox, ViewSettingsDialog, ViewSettingsItem, ValueHelpDialog, DynamicDateRange, DateFormat, Spreadsheet, exportLibrary) {
 	"use strict";
 
 	var SortOrder = tableLibrary.SortOrder;
@@ -1303,18 +1302,18 @@ sap.ui.define([
 			var oDDR = this.byId("startupFilter");
 			var oDDRValue = (oDDR && oDDR.getValue) ? oDDR.getValue() : null;
 			if (oDDRValue) {
-				// DynamicDateRange.toDates was deprecated (1.118) and is unavailable in
-				// newer UI5; DynamicDateUtil.toDates is the supported helper. Fall back to
-				// the old static method, and never let a date-filter issue abort the load.
+				// Picker-selected values resolve via the standard helper. Free-typed text
+				// the control can't parse comes back as operator "PARSEERROR" (which makes
+				// toDates throw), so fall back to our own day-first parser that accepts
+				// / . and - . Either way a date-filter issue never aborts the load.
 				var aBounds = null;
-				try {
-					if (DynamicDateUtil && DynamicDateUtil.toDates) {
-						aBounds = DynamicDateUtil.toDates(oDDRValue);
-					} else if (DynamicDateRange && DynamicDateRange.toDates) {
-						aBounds = DynamicDateRange.toDates(oDDRValue);
-					}
-				} catch (e) {
-					aBounds = null;
+				if (oDDRValue.operator !== "PARSEERROR") {
+					try { aBounds = DynamicDateRange.toDates(oDDRValue); } catch (e) { aBounds = null; }
+				}
+				if (!aBounds || !aBounds.length) {
+					var aVals = oDDRValue.values || [];
+					var oTyped = this._parseFilterDate(aVals[aVals.length - 1]);
+					if (oTyped) { aBounds = [oTyped, oTyped]; }
 				}
 				if (aBounds && aBounds.length) {
 					var ms = function (d) { return d.getJSDate ? d.getJSDate().getTime() : d.getTime(); };
