@@ -303,16 +303,25 @@ sap.ui.define([
 
 			this._hideError();
 
-			if (!aClassIds.length) {
-				MessageToast.show(this._bundle().getText("selectClassFirst"));
-				return;
-			}
-
 			var oCfg = this._typeConfig(sClassType);
 
 			// Honour the brief: 002 first; 003 is wired but not enabled in v1.
 			if (!oCfg || !oCfg.enabled) {
 				this._showError(this._bundle().getText("typeNotSupported"));
+				return;
+			}
+
+			// No class ticked: treat it as "all classes of this type", but bound the
+			// search by the Planner Group so it never tries to load the whole type.
+			// (Planner Group is class-independent.) Other filters refine the result.
+			if (!aClassIds.length) {
+				var oPlanner = this.byId("plannerFilter");
+				var aPlannerKeys = (oPlanner && oPlanner.getSelectedKeys) ? oPlanner.getSelectedKeys() : [];
+				if (aPlannerKeys.length) {
+					this._loadResultsByPlannerGroup(oCfg, sClassType, aPlannerKeys);
+				} else {
+					MessageToast.show(this._bundle().getText("selectClassOrPlanner"));
+				}
 				return;
 			}
 
@@ -1018,6 +1027,138 @@ sap.ui.define([
 				oUI.setProperty("/multiClass", bMulti);
 				if (bMulti) {
 					oUI.setProperty("/viewMode", "list");
+				}
+
+				await this._applyAllFilters();
+			} catch (oError) {
+				this._showError(this._bundle().getText("dataLoadError", [this._extractError(oError)]));
+				oUI.setProperty("/showEmptyState", true);
+				oUI.setProperty("/tableBusy", false);
+			}
+		},
+
+		/**
+		 * Search across ALL classes of the type, bounded by the selected Planner
+		 * Group(s) — used when no class is ticked. Fetches the type's objects whose
+		 * MaintenancePlannerGroup matches (server-side, capped), resolves each object's
+		 * class to build the characteristic columns, then shows them like a multi-class
+		 * result. Other filter-bar criteria refine the result client-side.
+		 */
+		_loadResultsByPlannerGroup: async function (oCfg, sClassType, aPlannerKeys) {
+			var oUI = this._ui();
+			var that = this;
+			var sKeyField = oCfg.objectKeyField;
+			var sPlannerKey = "PG:" + aPlannerKeys.slice().sort().join(",");
+
+			// same planner set already loaded -> just re-apply the filters
+			if (this._pageCtx && this._pageCtx.plannerKey === sPlannerKey) {
+				await this._applyAllFilters();
+				return;
+			}
+
+			oUI.setProperty("/showEmptyState", false);
+			oUI.setProperty("/showNoData", false);
+			oUI.setProperty("/showTable", false);
+			oUI.setProperty("/tableBusy", true);
+
+			try {
+				// 1) the type's objects whose planner group is one of the selected codes
+				var sFilter = "(" + aPlannerKeys.map(function (k) {
+					return "MaintenancePlannerGroup eq '" + that._esc(k) + "'";
+				}).join(" or ") + ")";
+				var aHeaderRows = await this._read(this._model(oCfg.modelName), oCfg.headerSet, {
+					"$filter": sFilter,
+					"$select": oCfg.headerSelect,
+					"$top": MAX_LIST_ROWS
+				});
+				var bTruncated = aHeaderRows.length >= MAX_LIST_ROWS;
+
+				// dedupe by object key (Equipment is time-dependent: keep latest validity)
+				var mHeaders = {};
+				aHeaderRows.forEach(function (o) {
+					var k = o[sKeyField];
+					if (!k) { return; }
+					var oPrev = mHeaders[k];
+					if (!oPrev || !oCfg.headerHasValidity ||
+						that._epoch(o.ValidityEndDate) >= that._epoch(oPrev.ValidityEndDate)) {
+						mHeaders[k] = o;
+					}
+				});
+				var aAllKeys = Object.keys(mHeaders);
+
+				if (!aAllKeys.length) {
+					oUI.setProperty("/rows", []);
+					oUI.setProperty("/listRows", []);
+					oUI.setProperty("/showTable", false);
+					oUI.setProperty("/showNoData", true);
+					oUI.setProperty("/noDataTitle", this._bundle().getText("noPlannerObjects", [aPlannerKeys.join(", ")]));
+					oUI.setProperty("/tableBusy", false);
+					return;
+				}
+
+				// 2) resolve each object's class (chunked, to bound the $filter length)
+				var aChunks = this._chunk(aAllKeys, 100);
+				var aAssignArrays = await Promise.all(aChunks.map(function (aChunk) {
+					var sOr = aChunk.map(function (k) {
+						return sKeyField + " eq '" + that._esc(k) + "'";
+					}).join(" or ");
+					return that._read(that._model(oCfg.modelName), oCfg.keyClassSet, {
+						"$filter": "(" + sOr + ")",
+						"$select": sKeyField + ",ClassInternalID,ClassType,Class",
+						"$top": MAX_LIST_ROWS
+					});
+				}));
+				var mClassByKey = {};
+				var oClassSeen = {};
+				var aClassIds = [];
+				aAssignArrays.forEach(function (aAssign) {
+					aAssign.forEach(function (o) {
+						var k = o[sKeyField];
+						if (k && !mClassByKey[k]) {
+							mClassByKey[k] = { ClassInternalID: o.ClassInternalID, Class: o.Class };
+						}
+						if (o.ClassInternalID && !oClassSeen[o.ClassInternalID]) {
+							oClassSeen[o.ClassInternalID] = true;
+							aClassIds.push(o.ClassInternalID);
+						}
+					});
+				});
+
+				// 3) union characteristics across the involved classes -> columns
+				var oUnion = await this._fetchUnionCharacteristics(aClassIds);
+				this._buildColumns(oUnion.chars, oCfg);
+
+				var oContext = {
+					className: this._bundle().getText("multipleClasses"),
+					classId: null,
+					classByKey: mClassByKey
+				};
+
+				this._pageCtx = {
+					oCfg: oCfg,
+					sClassType: sClassType,
+					plannerKey: sPlannerKey,
+					sClassId: null,
+					className: oContext.className,
+					classByKey: mClassByKey,
+					aChars: oUnion.chars,
+					mMeta: oUnion.meta,
+					allKeys: aAllKeys,
+					keys: aAllKeys.slice(),
+					headers: mHeaders,
+					sortVals: this._buildSortVals(oCfg, aAllKeys, mHeaders, oContext),
+					sortField: oCfg.fixedColumns[0].key,
+					sortDesc: false
+				};
+
+				oUI.setProperty("/charcOptions", oUnion.chars.map(function (oChar) {
+					return { key: oChar.CharcInternalID, text: oChar.Characteristic };
+				}));
+				oUI.setProperty("/multiClass", true);
+				oUI.setProperty("/viewMode", "list");
+
+				if (bTruncated) {
+					MessageToast.show(this._bundle().getText("plannerTruncated", [MAX_LIST_ROWS]));
 				}
 
 				await this._applyAllFilters();

@@ -65,6 +65,13 @@
 								</MultiComboBox>
 							</fb:control>
 						</fb:FilterGroupItem>
+						<fb:FilterGroupItem name="planner" label="{i18n>filterPlanner}" groupName="main" visibleInFilterBar="true">
+							<fb:control>
+								<MultiComboBox id="plannerFilter" width="100%" placeholder="{i18n>filterPlannerPlaceholder}" busy="{ui>/plannerBusy}" busyIndicatorDelay="0" items="{ path: 'ui>/plannerOptions', templateShareable: false }">
+										<core:Item key="{ui>key}" text="{ui>text}" />
+									</MultiComboBox>
+							</fb:control>
+						</fb:FilterGroupItem>
 						<fb:FilterGroupItem name="object" label="{i18n>filterObjectSearch}" groupName="main" visibleInFilterBar="true">
 							<fb:control>
 								<MultiInput
@@ -106,13 +113,6 @@
 						<fb:FilterGroupItem name="superior" label="{i18n>filterSuperior}" groupName="main" visibleInFilterBar="true">
 							<fb:control>
 								<MultiInput id="superiorFilter" width="100%" placeholder="{i18n>filterSuperiorPlaceholder}" showValueHelp="true" valueHelpRequest="onSuperiorValueHelp" />
-							</fb:control>
-						</fb:FilterGroupItem>
-						<fb:FilterGroupItem name="planner" label="{i18n>filterPlanner}" groupName="main" visibleInFilterBar="true">
-							<fb:control>
-								<MultiComboBox id="plannerFilter" width="100%" placeholder="{i18n>filterPlannerPlaceholder}" busy="{ui>/plannerBusy}" busyIndicatorDelay="0" items="{ path: 'ui>/plannerOptions', templateShareable: false }">
-										<core:Item key="{ui>key}" text="{ui>text}" />
-									</MultiComboBox>
 							</fb:control>
 						</fb:FilterGroupItem>
 						<fb:FilterGroupItem name="startup" label="{i18n>filterStartUp}" groupName="main" visibleInFilterBar="{= ${ui&gt;/classType} === '002' }">
