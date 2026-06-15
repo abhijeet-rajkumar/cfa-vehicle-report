@@ -135,8 +135,6 @@ sap.ui.define([
 
 			// Default Class Type is 002 (already "selected"), so load its classes immediately.
 			this._loadClasses("002");
-			// Planner Group options are class-independent — load the default type up front.
-			this._loadPlannerGroupsForType("002");
 		},
 
 		/* =========================================================== */
@@ -238,8 +236,6 @@ sap.ui.define([
 			this._resetResults();
 
 			this._loadClasses(sClassType);
-			// Planner Group is class-independent — (re)load it for the new class TYPE.
-			this._loadPlannerGroupsForType(sClassType);
 		},
 
 		onClassChange: async function () {
@@ -257,22 +253,39 @@ sap.ui.define([
 				oCharc.setSelectedKeys([]);
 			}
 			oUI.setProperty("/charcOptions", []);
+			// the planner-group options come from the previous class's objects — reset
+			var oPlanner = this.byId("plannerFilter");
+			if (oPlanner && oPlanner.setSelectedKeys) {
+				oPlanner.setSelectedKeys([]);
+			}
+			oUI.setProperty("/plannerOptions", []);
+
 			// nothing selected -> dependent filters cleared, done
 			if (!aIds.length) {
 				oUI.setProperty("/charcBusy", false);
+				oUI.setProperty("/plannerBusy", false);
 				return;
 			}
 
-			// Build the Characteristic filter for the selected class(es) immediately,
-			// without waiting for Go (from the class definition). A token guards the
-			// rapid selectionChange events fired while ticking several classes. Planner
-			// Group is class-independent (loaded per class TYPE) and is not built here.
+			// Build the dependent filters for the selected class(es) immediately,
+			// without waiting for Go: the Characteristic list (from the class
+			// definition) and the Planner Group list (distinct values from the class
+			// objects). A token guards the rapid selectionChange events fired while
+			// ticking several classes.
 			var that = this;
+			var sClassType = this.byId("classTypeSelect").getSelectedKey();
+			var oCfg = this._typeConfig(sClassType);
+			var aAllClasses = oUI.getProperty("/classes") || [];
+			var aClasses = aIds.map(function (sId) {
+				var oC = aAllClasses.filter(function (c) { return c.ClassInternalID === sId; })[0];
+				return oC ? { ClassInternalID: oC.ClassInternalID, Class: oC.Class, ClassType: sClassType } : null;
+			}).filter(Boolean);
 
 			var iToken = (this._depLoadToken = (this._depLoadToken || 0) + 1);
 			oUI.setProperty("/charcBusy", true);
+			oUI.setProperty("/plannerBusy", true);
 
-			await this._fetchUnionCharacteristics(aIds).then(function (oUnion) {
+			var pChars = this._fetchUnionCharacteristics(aIds).then(function (oUnion) {
 				if (iToken !== that._depLoadToken) { return; }
 				oUI.setProperty("/charcOptions", oUnion.chars.map(function (oChar) {
 					return { key: oChar.CharcInternalID, text: oChar.Characteristic };
@@ -281,6 +294,16 @@ sap.ui.define([
 				if (iToken === that._depLoadToken) { oUI.setProperty("/charcBusy", false); }
 			});
 
+			var pPlanner = ((oCfg && oCfg.headerExpandNav && aClasses.length)
+				? this._fetchPlannerOptions(oCfg, aClasses, sClassType)
+				: Promise.resolve([])).then(function (aOpts) {
+				if (iToken !== that._depLoadToken) { return; }
+				oUI.setProperty("/plannerOptions", aOpts);
+			}).catch(function () { /* non-fatal */ }).then(function () {
+				if (iToken === that._depLoadToken) { oUI.setProperty("/plannerBusy", false); }
+			});
+
+			await Promise.all([pChars, pPlanner]);
 		},
 
 		onClearPress: function () {
@@ -1015,6 +1038,9 @@ sap.ui.define([
 				oUI.setProperty("/charcOptions", oUnion.chars.map(function (oChar) {
 					return { key: oChar.CharcInternalID, text: oChar.Characteristic };
 				}));
+				// Planner Group filter options: the distinct planner groups actually
+				// present in the loaded class(es), so the dropdown only offers real values.
+				oUI.setProperty("/plannerOptions", this._distinctHeaderValues(mHeaders, aAllKeys, "MaintenancePlannerGroup"));
 				oUI.setProperty("/multiClass", bMulti);
 				if (bMulti) {
 					oUI.setProperty("/viewMode", "list");
@@ -1294,6 +1320,21 @@ sap.ui.define([
 			}
 
 			return aKeys;
+		},
+
+		/** Distinct, sorted, non-empty values of a header field across the keys,
+		 *  shaped as { key, text } options for a dropdown. */
+		_distinctHeaderValues: function (mHeaders, aKeys, sField) {
+			var oSeen = {};
+			(aKeys || []).forEach(function (k) {
+				var v = mHeaders[k] && mHeaders[k][sField];
+				if (v !== undefined && v !== null && v !== "") {
+					oSeen[v] = true;
+				}
+			});
+			return Object.keys(oSeen).sort().map(function (v) {
+				return { key: v, text: v };
+			});
 		},
 
 		/** Floor an epoch to the start of its calendar day (local time). */
@@ -1878,44 +1919,37 @@ sap.ui.define([
 		},
 
 		/**
-		 * Load the Planner Group dropdown options for a class TYPE, independent of the
-		 * selected class: distinct MaintenancePlannerGroup across all objects of that
-		 * type (Equipment from API_EQUIPMENT, Functional Location from
-		 * API_FUNCTIONALLOCATION). Cached per type. A narrow single-field read bounded
-		 * by MAX_LIST_ROWS — the planner-group scheme is small, so the sample covers it.
+		 * Lightweight fetch of the distinct planner groups in the selected class(es),
+		 * used to populate the Planner Group dropdown the moment a class is chosen.
+		 * Expands the class->object navigation but selects ONLY the planner field, so
+		 * the payload is a fraction of the full object load.
+		 * @returns {Promise<object[]>} [{ key, text }] planner-group options
 		 */
-		_loadPlannerGroupsForType: function (sClassType) {
+		_fetchPlannerOptions: async function (oCfg, aClasses, sClassType) {
 			var that = this;
-			var oUI = this._ui();
-			var oCfg = this._typeConfig(sClassType);
-			if (!oCfg) { return; }
+			var oModel = this._model(oCfg.modelName);
+			var sNav = oCfg.headerExpandNav;
+			var oSeen = {};
 
-			// serve from cache once a type's groups have been loaded
-			this._plannerCache = this._plannerCache || {};
-			if (this._plannerCache[sClassType]) {
-				oUI.setProperty("/plannerOptions", this._plannerCache[sClassType]);
-				return;
-			}
-
-			var iToken = (this._plannerLoadToken = (this._plannerLoadToken || 0) + 1);
-			oUI.setProperty("/plannerBusy", true);
-
-			this._read(this._model(oCfg.modelName), oCfg.headerSet, {
-				"$select": "MaintenancePlannerGroup",
-				"$top": MAX_LIST_ROWS
-			}).then(function (aRows) {
-				var oSeen = {};
-				aRows.forEach(function (o) {
-					var v = o.MaintenancePlannerGroup;
-					if (v !== undefined && v !== null && v !== "") { oSeen[v] = true; }
+			await Promise.all(aClasses.map(function (oClass) {
+				return that._read(oModel, oCfg.keyClassSet, {
+					"$filter": "ClassInternalID eq '" + that._esc(oClass.ClassInternalID) + "' and ClassType eq '" + that._esc(sClassType) + "'",
+					"$expand": sNav,
+					"$select": oCfg.objectKeyField + "," + sNav + "/MaintenancePlannerGroup",
+					"$top": MAX_LIST_ROWS
+				}).then(function (aRows) {
+					aRows.forEach(function (oRow) {
+						var oHeader = oRow[sNav];
+						var v = oHeader && oHeader.MaintenancePlannerGroup;
+						if (v !== undefined && v !== null && v !== "") {
+							oSeen[v] = true;
+						}
+					});
 				});
-				var aOpts = Object.keys(oSeen).sort().map(function (v) { return { key: v, text: v }; });
-				that._plannerCache[sClassType] = aOpts;
-				if (iToken === that._plannerLoadToken) { oUI.setProperty("/plannerOptions", aOpts); }
-			}).catch(function () {
-				if (iToken === that._plannerLoadToken) { oUI.setProperty("/plannerOptions", []); }
-			}).then(function () {
-				if (iToken === that._plannerLoadToken) { oUI.setProperty("/plannerBusy", false); }
+			}));
+
+			return Object.keys(oSeen).sort().map(function (v) {
+				return { key: v, text: v };
 			});
 		},
 
