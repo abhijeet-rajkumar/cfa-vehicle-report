@@ -1368,12 +1368,13 @@ sap.ui.define([
 			var oModel = this._model(oCfg.modelName);
 			var mMeta = ctx.mMeta || {};
 
-			// Build one server query per (characteristic, condition). When a
-			// characteristic is selected we know its data type, so numeric/date/
-			// currency conditions filter the TYPED field (CharcFromNumericValue /
-			// CharcFromDate / CharcFromAmount) numerically instead of string-matching
-			// CharcValue. With no characteristic selected we can't know the type, so
-			// we fall back to the CharcValue string match across any characteristic.
+			// When characteristic(s) are selected we know the data type, so each query
+			// is scoped to that characteristic and filters the TYPED field for its type
+			// (CharcFromNumericValue / CharcFromDate / CharcFromAmount), else the
+			// CharcValue string. With NO characteristic selected the type is unknown, so
+			// we OR across all types (string + numeric + date) per condition, since SAP
+			// stores each value in the field for its type (CharcValue is empty for NUM
+			// and DATE), and search across every characteristic.
 			var aSpecs = [];
 			if (aCharcIds.length) {
 				aCharcIds.forEach(function (sCharcId) {
@@ -1384,20 +1385,22 @@ sap.ui.define([
 				});
 			} else {
 				aValConds.forEach(function (oCond) {
-					// No characteristic selected, so the data type is unknown. A value
-					// entered as a date (DD/MM/YYYY or DD.MM.YYYY) is only meaningful for
-					// DATE characteristics, where the date lives in the typed CharcFromDate
-					// field (CharcValue is empty). So restrict the search to DATE
-					// characteristics and match CharcFromDate. Any other value is a plain
-					// CharcValue substring match across every characteristic.
-					var sDateClause = that._isDateValue(oCond.value1)
-						? that._dateFilter("CharcFromDate", oCond)
-						: null;
-					if (sDateClause) {
-						aSpecs.push("CharcDataType eq 'DATE' and (" + sDateClause + ")");
-					} else {
-						aSpecs.push(that._valueConditionFilter(oCond));
+					// No characteristic selected: search across ALL types and OR them. Always
+					// match the CharcValue string; additionally match the typed date field for
+					// a date-looking value, or the typed numeric fields (NUM + CURR) for a
+					// number. Non-matching typed fields are null on a row, so they never add
+					// false positives. Rows are still intersected with the loaded class objects.
+					var aOr = [that._valueConditionFilter(oCond)];
+					if (that._isDateValue(oCond.value1)) {
+						var sDate = that._dateFilter("CharcFromDate", oCond);
+						if (sDate) { aOr.push(sDate); }
+					} else if (that._isNumericValue(oCond.value1)) {
+						var sNum = that._numericFilter("CharcFromNumericValue", oCond);
+						if (sNum) { aOr.push(sNum); }
+						var sAmt = that._numericFilter("CharcFromAmount", oCond);
+						if (sAmt) { aOr.push(sAmt); }
 					}
+					aSpecs.push(aOr.length > 1 ? "(" + aOr.join(" or ") + ")" : aOr[0]);
 				});
 			}
 
@@ -1512,6 +1515,14 @@ sap.ui.define([
 		_isDateValue: function (v) {
 			if (v === undefined || v === null) { return false; }
 			return (/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/).test(String(v).trim());
+		},
+
+		/** True when the value is a plain number (integer or decimal). Used to also
+		 *  match the typed numeric fields (CharcFromNumericValue / CharcFromAmount)
+		 *  when no characteristic is selected. */
+		_isNumericValue: function (v) {
+			if (v === undefined || v === null || v === "") { return false; }
+			return (/^-?\d+(\.\d+)?$/).test(String(v).trim());
 		},
 
 		/** Build a CharcValue (string) OData clause for a value condition. */
