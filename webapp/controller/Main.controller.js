@@ -1177,13 +1177,28 @@ sap.ui.define([
 				// group, start-up date) — matched in memory against the loaded headers
 				aKeys = this._applyHeaderFilters(aKeys);
 
-				// characteristic-value conditions — resolve matching objects server-side
-				var aValConds = this._tokenConditions(this.byId("charcValueSearch"));
+				// characteristic-value conditions — resolved server-side
+				var aAllValConds = this._tokenConditions(this.byId("charcValueSearch"));
+				var oCharcSelect = this.byId("charcSelect");
+				var aCharcIds = oCharcSelect ? oCharcSelect.getSelectedKeys() : [];
+
+				// empty / not-empty conditions filter by whether the characteristic HAS a
+				// value (polarity from the exclude flag). They need a characteristic to be
+				// meaningful, so are ignored when none is selected.
+				var aEmptyConds = aAllValConds.filter(function (c) { return c.operation === "Empty"; });
+				var aValConds = aAllValConds.filter(function (c) { return c.operation !== "Empty"; });
+
 				if (aValConds.length) {
-					var oCharcSelect = this.byId("charcSelect");
-					var aCharcIds = oCharcSelect ? oCharcSelect.getSelectedKeys() : [];
 					var oSet = await this._resolveValueKeys(ctx, aValConds, aCharcIds);
 					aKeys = aKeys.filter(function (sKey) { return oSet[sKey]; });
+				}
+				if (aEmptyConds.length && aCharcIds.length) {
+					var oHasVal = await this._resolveHasValueKeys(ctx, aCharcIds, aKeys);
+					aEmptyConds.forEach(function (oCond) {
+						aKeys = aKeys.filter(function (sKey) {
+							return oCond.exclude ? !!oHasVal[sKey] : !oHasVal[sKey];
+						});
+					});
 				}
 
 				ctx.keys = aKeys;
@@ -1209,7 +1224,7 @@ sap.ui.define([
 			var aConds = oMultiInput.getTokens().map(function (oToken) {
 				var oRange = oToken.data("range");
 				if (oRange && oRange.operation) {
-					return { operation: oRange.operation, value1: oRange.value1, value2: oRange.value2 };
+					return { operation: oRange.operation, value1: oRange.value1, value2: oRange.value2, exclude: !!oRange.exclude };
 				}
 				// a plain typed token -> forgiving "contains" match
 				return { operation: "Contains", value1: oToken.getKey() || oToken.getText(), value2: null };
@@ -1220,7 +1235,10 @@ sap.ui.define([
 				aConds.push({ operation: "Contains", value1: sTyped, value2: null });
 			}
 			return aConds.filter(function (oCond) {
-				return oCond.value1 !== undefined && oCond.value1 !== null && oCond.value1 !== "";
+				// keep empty / not-empty conditions (they carry no value); drop any other
+				// condition that has no value to match.
+				return oCond.operation === "Empty" ||
+					(oCond.value1 !== undefined && oCond.value1 !== null && oCond.value1 !== "");
 			});
 		},
 
@@ -1426,6 +1444,52 @@ sap.ui.define([
 				Object.keys(oSet).forEach(function (k) { oUnion[k] = true; });
 			});
 			return oUnion;
+		},
+
+		/**
+		 * Resolve, from the candidate keys, the ones that HAVE a value for the selected
+		 * characteristic(s) — for the empty / not-empty filter. Type-aware: the value
+		 * lives in the typed field for the characteristic's data type
+		 * (CharcFromNumericValue for NUM, CharcFromDate for DATE, etc. — CharcValue is
+		 * empty for those). Scoped to the candidate keys (chunked) so the result is exact
+		 * for the loaded objects and never truncated by the row cap. Union across chars.
+		 */
+		_resolveHasValueKeys: async function (ctx, aCharcIds, aKeys) {
+			var that = this;
+			var oCfg = ctx.oCfg;
+			var sKeyField = oCfg.objectKeyField;
+			var oModel = this._model(oCfg.modelName);
+			var mMeta = ctx.mMeta || {};
+			var oHas = {};
+			if (!aCharcIds.length || !aKeys || !aKeys.length) { return oHas; }
+
+			var aChunks = this._chunk(aKeys, 200);
+			var aReqs = [];
+			aCharcIds.forEach(function (sCharcId) {
+				var sType = (mMeta[sCharcId] && mMeta[sCharcId].CharcDataType) || "CHAR";
+				var sHas = sType === "NUM" ? "(CharcFromNumericValue ne null or CharcFromDecimalValue ne null)"
+					: sType === "CURR" ? "CharcFromAmount ne null"
+					: sType === "DATE" ? "CharcFromDate ne null"
+					: "CharcValue ne ''";
+				aChunks.forEach(function (aChunk) {
+					var sKeys = "(" + aChunk.map(function (k) { return sKeyField + " eq '" + that._esc(k) + "'"; }).join(" or ") + ")";
+					aReqs.push(sKeys + " and " + oCfg.charcIdField + " eq '" + that._esc(sCharcId) + "' and (" + sHas + ")");
+				});
+			});
+
+			var aSets = await Promise.all(aReqs.map(function (sFilter) {
+				return that._read(oModel, oCfg.valueSet, {
+					"$filter": sFilter,
+					"$select": sKeyField,
+					"$top": MAX_LIST_ROWS
+				}).then(function (aRows) {
+					var oSet = {};
+					aRows.forEach(function (r) { oSet[r[sKeyField]] = true; });
+					return oSet;
+				});
+			}));
+			aSets.forEach(function (oSet) { Object.keys(oSet).forEach(function (k) { oHas[k] = true; }); });
+			return oHas;
 		},
 
 		/** Build the server filter for a value condition against the right field for
