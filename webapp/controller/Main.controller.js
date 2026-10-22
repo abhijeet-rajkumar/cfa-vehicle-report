@@ -1317,9 +1317,16 @@ sap.ui.define([
 		},
 
 		_findCharacteristicId: function (aChars, sName) {
-			var sExpected = String(sName || "").trim().toLowerCase();
+			function norm(s) { return String(s || "").trim().toLowerCase(); }
+			// the class characteristic is exposed by its technical name
+			// (e.g. CABIN_CONFIGURATION), so also accept that name for the fixed filters
+			var aAliases = {
+				"cabin configuration": ["CABIN_CONFIGURATION"],
+				"equipment owned by": ["OWNER_EQUIPMENT"]
+			}[norm(sName)] || [];
+			var aExpected = [norm(sName)].concat(aAliases.map(norm));
 			var oChar = (aChars || []).filter(function (oItem) {
-				return String(oItem.Characteristic || "").trim().toLowerCase() === sExpected;
+				return aExpected.indexOf(norm(oItem.Characteristic)) !== -1;
 			})[0];
 			return oChar ? oChar.CharcInternalID : "";
 		},
