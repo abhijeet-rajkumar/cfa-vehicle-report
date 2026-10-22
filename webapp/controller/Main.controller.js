@@ -33,6 +33,24 @@ sap.ui.define([
 	// Only released classes are offered in the picker. '1' = Released in SAP classification.
 	var CLASS_STATUS_RELEASED = "1";
 
+	var EQUIPMENT_FIXED_CHARACTERISTICS = {
+		CABIN_CONFIGURATION: { id: "1894", field: "cabinConfig" },
+		OWNER_EQUIPMENT: { id: "1443", field: "ownedBy" }
+	};
+
+	function equipmentFixedCharacteristicField(oRow) {
+		var sCharacteristic = String(oRow.Characteristic || "");
+		var sCharacteristicId = String(oRow.CharacteristicInternalID || "");
+		var aNames = Object.keys(EQUIPMENT_FIXED_CHARACTERISTICS);
+		for (var i = 0; i < aNames.length; i++) {
+			var oCharacteristic = EQUIPMENT_FIXED_CHARACTERISTICS[aNames[i]];
+			if (sCharacteristic === aNames[i] || sCharacteristicId === oCharacteristic.id) {
+				return oCharacteristic.field;
+			}
+		}
+		return "";
+	}
+
 	// Cap on rows fetched from the value collection (brief: $top=2000).
 	var MAX_VALUE_ROWS = 2000;
 
@@ -2023,15 +2041,38 @@ sap.ui.define([
 				// safe — it only limits rows returned, not the rows the DB scans
 				"$top": iTop || MAX_VALUE_ROWS
 			});
-			// keep each object's values for the class we resolved for it: a per-object
-			// map for multi-object/multi-class search, else a single class id.
-			if (mClassByKey) {
-				return aRows.filter(function (r) {
-					var oC = mClassByKey[r[sKeyField]];
-					return oC && r.ClassInternalID === oC.ClassInternalID;
-				});
-			}
-			return aRows.filter(function (r) { return r.ClassInternalID === sClassId; });
+			var aClassRows = [];
+			var aEquipmentFixedRows = [];
+			var mFixedRows = {};
+			aRows.forEach(function (oRow) {
+				var sFixedField = oCfg.modelName === "equipment"
+					? equipmentFixedCharacteristicField(oRow)
+					: "";
+				if (sFixedField) {
+					var sFixedKey = oRow[sKeyField] + "\u0000" + sFixedField;
+					var iExisting = mFixedRows[sFixedKey];
+					if (iExisting === undefined) {
+						mFixedRows[sFixedKey] = aEquipmentFixedRows.length;
+						aEquipmentFixedRows.push(oRow);
+					} else if ((aEquipmentFixedRows[iExisting].CharcValue === undefined ||
+						aEquipmentFixedRows[iExisting].CharcValue === null ||
+						aEquipmentFixedRows[iExisting].CharcValue === "") &&
+						oRow.CharcValue !== undefined && oRow.CharcValue !== null && oRow.CharcValue !== "") {
+						aEquipmentFixedRows[iExisting] = oRow;
+					}
+				}
+
+				// Keep normal values for the resolved class, but retain the two
+				// equipment-level fields across all of an equipment's class rows.
+				var oClass = mClassByKey && mClassByKey[oRow[sKeyField]];
+				var bInClass = mClassByKey
+					? oClass && oRow.ClassInternalID === oClass.ClassInternalID
+					: oRow.ClassInternalID === sClassId;
+				if (!sFixedField && bInClass) {
+					aClassRows.push(oRow);
+				}
+			});
+			return aClassRows.concat(aEquipmentFixedRows);
 		},
 
 		/* =========================================================== */
@@ -2181,7 +2222,7 @@ sap.ui.define([
 				var oGroup = oGroups[sKey];
 				if (!oGroup) {
 					var oHeader = (mHeaders && mHeaders[sKey]) || {};
-					oGroup = { __key: sKey, __cells: {} };
+					oGroup = { __key: sKey, __cells: {}, cabinConfig: null, ownedBy: null };
 
 					// fixed columns (oRow may be null for a seeded object with no values)
 					oCfg.fixedColumns.forEach(function (oFixed) {
@@ -2208,6 +2249,14 @@ sap.ui.define([
 					return;
 				}
 				var oGroup = ensureGroup(sKey, oRow);
+				var sFixedField = oCfg.modelName === "equipment"
+					? equipmentFixedCharacteristicField(oRow)
+					: "";
+				if (sFixedField) {
+					oGroup[sFixedField] = (oRow.CharcValue === undefined || oRow.CharcValue === null || oRow.CharcValue === "")
+						? null
+						: oRow.CharcValue;
+				}
 
 				// characteristic cell — accumulate for multi-value handling
 				var sCharcId = oRow[sCharcIdField];
@@ -2230,6 +2279,8 @@ sap.ui.define([
 				oCfg.fixedColumns.forEach(function (oFixed) {
 					oOut[oFixed.key] = oGroup[oFixed.key];
 				});
+				oOut.cabinConfig = oGroup.cabinConfig;
+				oOut.ownedBy = oGroup.ownedBy;
 
 				aChars.forEach(function (oChar) {
 					var aBucket = oGroup.__cells[oChar.CharcInternalID] || [];
@@ -2291,8 +2342,6 @@ sap.ui.define([
 			var bShowEmpty = !!this._ui().getProperty("/showEmpty");
 			var aSelectedCharcIds = this._selectedKeys("charcSelect");
 			var aSelectedValues = this._selectedKeys("charcValueFilter");
-			var sCabinId = this._findCharacteristicId(aChars, "Cabin Configuration");
-			var sOwnerId = this._findCharacteristicId(aChars, "Equipment Owned by");
 			var sOdometerId = this._findCharacteristicId(aChars, "Odometer Reading");
 
 			return aRows.map(function (oRow) {
@@ -2302,8 +2351,8 @@ sap.ui.define([
 					TechnicalObjectDescription: oRow.objDesc || "",
 					VehicleAge: this._vehicleAge(oHeader.OperationStartDate),
 					Class: oRow.objClass || "",
-					CabinConfiguration: sCabinId ? (oRow["C_" + sCabinId] || "") : "",
-					EquipmentOwnedBy: sOwnerId ? (oRow["C_" + sOwnerId] || "") : "",
+					CabinConfiguration: oRow.cabinConfig,
+					EquipmentOwnedBy: oRow.ownedBy,
 					OdometerReading: sOdometerId ? (oRow["C_" + sOdometerId] || "") : "",
 					StartUpDate: fmtSAPDateISO(oRow.OperationStartDate),
 					ManufacturerSerialNumber: oRow.ManufacturerSerialNumber || "",
