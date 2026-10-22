@@ -2411,12 +2411,17 @@ sap.ui.define([
 			}
 			var dStart = new Date(this._epoch(vStartDate));
 			var dToday = new Date();
-			var iAge = dToday.getUTCFullYear() - dStart.getUTCFullYear();
-			if (dToday.getUTCMonth() < dStart.getUTCMonth() ||
-				(dToday.getUTCMonth() === dStart.getUTCMonth() && dToday.getUTCDate() < dStart.getUTCDate())) {
-				iAge--;
+			var iMonths = (dToday.getUTCFullYear() - dStart.getUTCFullYear()) * 12 +
+				dToday.getUTCMonth() - dStart.getUTCMonth();
+			if (dToday.getUTCDate() < dStart.getUTCDate()) {
+				iMonths--;
 			}
-			return String(Math.max(0, iAge));
+			iMonths = Math.max(0, iMonths);
+			var iYears = Math.floor(iMonths / 12);
+			iMonths %= 12;
+			var oBundle = this._bundle();
+			return iYears + " " + oBundle.getText(iYears === 1 ? "vehicleAgeYear" : "vehicleAgeYears") +
+				" " + iMonths + " " + oBundle.getText(iMonths === 1 ? "vehicleAgeMonth" : "vehicleAgeMonths");
 		},
 
 		_buildColumns: function (aChars, oCfg) {
