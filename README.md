@@ -95,8 +95,8 @@ This app runs **standalone behind a standard approuter** (no FLP tile, no HTML5 
 npm install -g mbt        # Cloud MTA Build Tool (one-time)
 cf install-plugin multiapps   # MultiApps CF plugin (one-time)
 
-mbt build                 # -> mta_archives/cfa-characteristics-report_1.0.0.mtar
-cf deploy mta_archives/cfa-characteristics-report_1.0.0.mtar
+mbt build                 # -> mta_archives/cfa-vehicle-report_1.0.0.mtar
+cf deploy mta_archives/cfa-vehicle-report_1.0.0.mtar
 ```
 
 After deploy, open the `cfa-charlist-approuter` app's route.

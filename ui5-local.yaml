@@ -1,6 +1,6 @@
 specVersion: "3.1"
 metadata:
-  name: cfa-characteristics-report
+  name: cfa-vehicle-report
 type: application
 server:
   customMiddleware:
@@ -16,10 +16,10 @@ server:
     - name: fiori-tools-proxy
       afterMiddleware: compression
       configuration:
-        ignoreCertError: true
+        ignoreCertErrors: true
         backend:
           - path: /sap
-            url: https://REPLACE-WITH-LOCAL-OR-TUNNELLED-BACKEND
+            url: https://my419415-api.s4hana.cloud.sap
         ui5:
           path:
             - /resources

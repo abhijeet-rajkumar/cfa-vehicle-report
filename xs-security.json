@@ -1,5 +1,5 @@
 {
-  "xsappname": "cfa-characteristics-report",
+  "xsappname": "cfa-vehicle-report",
   "tenant-mode": "dedicated",
   "description": "Security configuration for the CFA Technical Object Characteristics Report",
   "scopes": [],

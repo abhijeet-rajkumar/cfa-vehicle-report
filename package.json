@@ -1,5 +1,5 @@
 {
-  "name": "cfa-characteristics-report",
+  "name": "cfa-vehicle-report",
   "version": "1.0.0",
   "description": "CFA Technical Object Characteristics List Report - dynamic-column classified object viewer (SAPUI5)",
   "private": true,

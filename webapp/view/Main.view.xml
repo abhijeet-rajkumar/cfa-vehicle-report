@@ -36,88 +36,74 @@
 					search="onGoPress"
 					clear="onClearPress">
 					<fb:filterGroupItems>
-						<fb:FilterGroupItem name="classType" label="{i18n>filterClassType}" groupName="main" visibleInFilterBar="true">
-							<fb:control>
-								<Select
-									id="classTypeSelect"
-									selectedKey="{ui>/classType}"
-									change="onClassTypeChange"
-									forceSelection="true"
-									width="100%">
-									<core:Item key="002" text="{i18n>classType002}" />
-									<core:Item key="003" text="{i18n>classType003}" />
-								</Select>
-							</fb:control>
-						</fb:FilterGroupItem>
 						<fb:FilterGroupItem name="class" label="{i18n>filterClass}" groupName="main" visibleInFilterBar="true">
 							<fb:control>
-								<MultiComboBox
+								<Select
 									id="classSelect"
-									selectedKeys="{ui>/classIds}"
+									selectedKey="{ui>/classId}"
 									enabled="{ui>/classSelectEnabled}"
 									busy="{ui>/classBusy}"
 									busyIndicatorDelay="0"
+									forceSelection="false"
+									change="onClassChange"
 									placeholder="{i18n>classPlaceholder}"
 									width="100%"
-									selectionChange="onClassChange"
 									items="{ path: 'ui>/classes', templateShareable: false }">
 									<core:Item key="{ui>ClassInternalID}" text="{ui>__display}" />
-								</MultiComboBox>
+								</Select>
 							</fb:control>
 						</fb:FilterGroupItem>
-						<fb:FilterGroupItem name="object" label="{i18n>filterObjectSearch}" groupName="main" visibleInFilterBar="true">
-							<fb:control>
-								<MultiInput
-									id="objectSearch"
-									width="100%"
-									placeholder="{i18n>objectSearchPlaceholder}"
-									showValueHelp="true"
-									valueHelpRequest="onObjectValueHelp" />
-							</fb:control>
-						</fb:FilterGroupItem>
-						<fb:FilterGroupItem name="charc" label="{i18n>filterCharc}" groupName="main" visibleInFilterBar="true">
+						<fb:FilterGroupItem name="charc" label="{i18n>filterSubClassCharc}" groupName="main" visibleInFilterBar="true">
 							<fb:control>
 								<MultiComboBox
 									id="charcSelect"
 									width="100%"
-									placeholder="{i18n>charcPlaceholder}"
+									placeholder="{i18n>subClassCharcPlaceholder}"
 									busy="{ui>/charcBusy}"
 									busyIndicatorDelay="0"
+									selectionChange="onSubClassChange"
 									items="{ path: 'ui>/charcOptions', templateShareable: false }">
 									<core:Item key="{ui>key}" text="{ui>text}" />
 								</MultiComboBox>
 							</fb:control>
 						</fb:FilterGroupItem>
-						<fb:FilterGroupItem name="charcValue" label="{i18n>filterCharcValue}" groupName="main" visibleInFilterBar="true">
+						<fb:FilterGroupItem name="charcValue" label="{i18n>filterSubClassValue}" groupName="main" visibleInFilterBar="true">
 							<fb:control>
-								<MultiInput
-									id="charcValueSearch"
+								<MultiComboBox
+									id="charcValueFilter"
 									width="100%"
-									placeholder="{i18n>charcValuePlaceholder}"
-									showValueHelp="true"
-									valueHelpRequest="onCharcValueValueHelp" />
+									busy="{ui>/charcValueBusy}"
+									busyIndicatorDelay="0"
+									placeholder="{i18n>subClassValuePlaceholder}"
+									items="{ path: 'ui>/charcValueOptions', templateShareable: false }">
+									<core:Item key="{ui>key}" text="{ui>text}" />
+								</MultiComboBox>
 							</fb:control>
 						</fb:FilterGroupItem>
-						<fb:FilterGroupItem name="serial" label="{i18n>filterSerial}" groupName="main" visibleInFilterBar="{= ${ui&gt;/classType} === '002' }">
+						<fb:FilterGroupItem name="cabinConfiguration" label="{i18n>filterCabinConfig}" groupName="main" visibleInFilterBar="true">
 							<fb:control>
-								<MultiInput id="serialFilter" width="100%" placeholder="{i18n>filterSerialPlaceholder}" showValueHelp="true" valueHelpRequest="onSerialValueHelp" />
+								<MultiComboBox
+									id="cabinConfigFilter"
+									placeholder="{i18n>cabinConfigPlaceholder}"
+									busy="{ui>/charcBusy}"
+									busyIndicatorDelay="0"
+									width="100%"
+									items="{ path: 'ui>/cabinConfigOptions', templateShareable: false }">
+									<core:Item key="{ui>key}" text="{ui>text}" />
+								</MultiComboBox>
 							</fb:control>
 						</fb:FilterGroupItem>
-						<fb:FilterGroupItem name="superior" label="{i18n>filterSuperior}" groupName="main" visibleInFilterBar="true">
+						<fb:FilterGroupItem name="equipmentOwnedBy" label="{i18n>filterOwnedBy}" groupName="main" visibleInFilterBar="true">
 							<fb:control>
-								<MultiInput id="superiorFilter" width="100%" placeholder="{i18n>filterSuperiorPlaceholder}" showValueHelp="true" valueHelpRequest="onSuperiorValueHelp" />
-							</fb:control>
-						</fb:FilterGroupItem>
-						<fb:FilterGroupItem name="planner" label="{i18n>filterPlanner}" groupName="main" visibleInFilterBar="true">
-							<fb:control>
-								<MultiComboBox id="plannerFilter" width="100%" placeholder="{i18n>filterPlannerPlaceholder}" busy="{ui>/plannerBusy}" busyIndicatorDelay="0" items="{ path: 'ui>/plannerOptions', templateShareable: false }">
-										<core:Item key="{ui>key}" text="{ui>text}" />
-									</MultiComboBox>
-							</fb:control>
-						</fb:FilterGroupItem>
-						<fb:FilterGroupItem name="startup" label="{i18n>filterStartUp}" groupName="main" visibleInFilterBar="{= ${ui&gt;/classType} === '002' }">
-							<fb:control>
-								<DynamicDateRange id="startupFilter" width="100%" />
+								<MultiComboBox
+									id="equipmentOwnedByFilter"
+									placeholder="{i18n>ownedByPlaceholder}"
+									busy="{ui>/charcBusy}"
+									busyIndicatorDelay="0"
+									width="100%"
+									items="{ path: 'ui>/equipmentOwnedByOptions', templateShareable: false }">
+									<core:Item key="{ui>key}" text="{ui>text}" />
+								</MultiComboBox>
 							</fb:control>
 						</fb:FilterGroupItem>
 					</fb:filterGroupItems>
@@ -157,82 +143,122 @@
 					title="{ui>/noDataTitle}"
 					description="{i18n>noDataDesc}" />
 
-				<!-- Shared toolbar for both views -->
-				<OverflowToolbar visible="{ui>/showTable}">
-					<Title id="tableTitle" text="{ui>/tableTitle}" level="H3" />
-					<Button id="prevPage" icon="sap-icon://navigation-left-arrow" tooltip="{i18n>prevPageButton}" enabled="{ui>/pagePrevEnabled}" press="onPrevPage" />
-					<Text id="pageInfo" text="{ui>/pageInfo}" />
-					<Button id="nextPage" icon="sap-icon://navigation-right-arrow" tooltip="{i18n>nextPageButton}" enabled="{ui>/pageNextEnabled}" press="onNextPage" />
-					<Select id="pageSizeSelect" selectedKey="{ui>/pageSize}" forceSelection="true" autoAdjustWidth="true" tooltip="{i18n>rowsPerPage}" change="onPageSizeChange">
-						<core:Item key="25" text="25" />
-						<core:Item key="50" text="50" />
-						<core:Item key="100" text="100" />
-					</Select>
-					<ToolbarSpacer />
-					<Switch id="showEmptySwitch" state="{ui>/showEmpty}" change="onShowEmptyChange" />
-					<Label text="{i18n>showEmpty}" />
-					<Button id="exportBtn" icon="sap-icon://excel-attachment" text="{i18n>exportButton}" tooltip="{i18n>exportButton}" press="onExport" />
-				</OverflowToolbar>
-
-				<!-- LIST / CARD VIEW (the only result view) -->
-				<ScrollContainer
-					id="listView"
+				<Panel
+					id="equipmentReportPanel"
+					headerText="{ui>/tableTitle}"
 					visible="{ui>/showTable}"
-					vertical="true"
-					horizontal="false"
-					height="100%"
+					expandable="true"
+					expanded="false"
+					width="100%">
+					<OverflowToolbar>
+						<Button id="prevPage" icon="sap-icon://navigation-left-arrow" tooltip="{i18n>prevPageButton}" enabled="{ui>/pagePrevEnabled}" press="onPrevPage" />
+						<Text id="pageInfo" text="{ui>/pageInfo}" />
+						<Button id="nextPage" icon="sap-icon://navigation-right-arrow" tooltip="{i18n>nextPageButton}" enabled="{ui>/pageNextEnabled}" press="onNextPage" />
+						<Select id="pageSizeSelect" selectedKey="{ui>/pageSize}" forceSelection="true" autoAdjustWidth="true" tooltip="{i18n>rowsPerPage}" change="onPageSizeChange">
+							<core:Item key="25" text="25" />
+							<core:Item key="50" text="50" />
+							<core:Item key="100" text="100" />
+						</Select>
+						<ToolbarSpacer />
+						<Switch id="showEmptySwitch" state="{ui>/showEmpty}" change="onShowEmptyChange" />
+						<Label text="{i18n>showEmpty}" />
+						<Button id="exportBtn" icon="sap-icon://excel-attachment" text="{i18n>exportButton}" tooltip="{i18n>exportButton}" press="onExport" />
+					</OverflowToolbar>
+
+				<OverflowToolbar class="sapUiTinyMarginBottom">
+					<Label text="{i18n>sortBy}" />
+					<HBox wrap="Wrap" items="{ path: 'ui>/sortFields', templateShareable: false }">
+						<Button text="{ui>label}" press="onSortFieldPress" type="{= ${ui>key} === ${ui>/sortField} ? 'Emphasized' : 'Transparent' }" icon="{= ${ui>key} === ${ui>/sortField} ? (${ui>/sortDesc} ? 'sap-icon://sort-descending' : 'sap-icon://sort-ascending') : 'sap-icon://sort' }" class="sapUiTinyMarginEnd" />
+					</HBox>
+				</OverflowToolbar>
+				<table:TreeTable
+					id="equipmentTreeTable"
+					visible="{ui>/showTable}"
+					rows="{path: 'ui>/treeRows', parameters: { arrayNames: ['children'] }}"
+					selectionMode="None"
+					fixedColumnCount="1"
+					enableColumnReordering="true"
+					alternateRowColors="true"
+					expandFirstLevel="true"
 					width="100%"
 					busy="{ui>/tableBusy}"
 					busyIndicatorDelay="0">
-					<layoutData>
-						<FlexItemData growFactor="1" />
-					</layoutData>
-					<OverflowToolbar class="sapUiTinyMarginBottom">
-							<Label text="{i18n>sortBy}" />
-							<HBox wrap="Wrap" items="{ path: 'ui>/sortFields', templateShareable: false }">
-								<Button text="{ui>label}" press="onSortFieldPress" type="{= ${ui>key} === ${ui>/sortField} ? 'Emphasized' : 'Transparent' }" icon="{= ${ui>key} === ${ui>/sortField} ? (${ui>/sortDesc} ? 'sap-icon://sort-descending' : 'sap-icon://sort-ascending') : 'sap-icon://sort' }" class="sapUiTinyMarginEnd" />
-							</HBox>
-						</OverflowToolbar>
-						<VBox items="{ path: 'ui>/listRows', templateShareable: false }">
-						<Panel class="cfaCard sapUiSmallMarginTop sapUiSmallMarginBegin sapUiSmallMarginEnd" backgroundDesign="Solid">
-							<HBox wrap="Wrap" alignItems="Start">
-								<!-- left: object master -->
-								<VBox width="22rem" class="sapUiSmallMargin cfaCardMaster">
-									<Label text="{ui>/objectLabel}" class="cfaMutedLabel" />
-									<Title text="{ui>objNumber}" level="H3" wrapping="true" />
-									<Text text="{ui>objDesc}" class="sapUiTinyMarginTop" />
-									<ObjectStatus text="{ui>objClass}" icon="sap-icon://tag" state="Information" inverted="true" class="sapUiTinyMarginTop" />
-									<!-- master fields in a two-column wrapping grid to keep the card compact -->
-									<HBox wrap="Wrap" class="sapUiTinyMarginTop" items="{ path: 'ui>masterFields', templateShareable: false }">
-										<VBox width="9.5rem" class="sapUiTinyMarginTop sapUiTinyMarginEnd">
-											<Label text="{ui>label}" class="cfaMutedLabel" wrapping="true" />
-											<Text text="{ui>value}" />
-										</VBox>
-									</HBox>
-								</VBox>
-								<!-- right: grouped characteristics -->
-								<VBox class="sapUiSmallMargin cfaCardGroups" items="{ path: 'ui>groups', templateShareable: false }">
-									<VBox class="sapUiSmallMarginBottom" visible="{= ${ui>populated} &gt; 0 || ${ui>/showEmpty} }">
-										<HBox alignItems="Center" class="cfaGroupHeader">
-											<core:Icon src="sap-icon://circle-task-2" size="0.55rem" color="#0a6ed1" class="sapUiTinyMarginEnd" />
-											<Title text="{ui>name}" level="H6" />
-											<Text text="{ui>countText}" class="cfaMutedLabel sapUiTinyMarginBegin" />
-										</HBox>
-										<HBox wrap="Wrap" items="{ path: 'ui>charcs', templateShareable: false }">
-											<VBox width="13rem" class="sapUiTinyMarginTop sapUiMediumMarginEnd" visible="{= ${ui>populated} || ${ui>/showEmpty} }">
-												<Label text="{ui>label}" class="cfaMutedLabel" />
-												<HBox alignItems="End">
-													<Text text="{ui>value}" />
-													<Text text="{ui>unit}" class="cfaMutedLabel sapUiTinyMarginBegin" visible="{= !!${ui>unit} }" />
-												</HBox>
-											</VBox>
-										</HBox>
-									</VBox>
-								</VBox>
-							</HBox>
-						</Panel>
-					</VBox>
-				</ScrollContainer>
+					<table:columns>
+						<table:Column width="12rem">
+							<Label text="{i18n>colTechnicalObject}" />
+							<table:template>
+								<Text text="{ui>TechnicalObject}" />
+							</table:template>
+						</table:Column>
+						<table:Column width="22rem">
+							<Label text="{i18n>colTechnicalObjectDescription}" />
+							<table:template>
+								<Text text="{ui>TechnicalObjectDescription}" />
+							</table:template>
+						</table:Column>
+						<table:Column width="9rem">
+							<Label text="{i18n>colVehicleAge}" />
+							<table:template>
+								<Text text="{ui>VehicleAge}" />
+							</table:template>
+						</table:Column>
+						<table:Column width="12rem">
+							<Label text="{i18n>colClass}" />
+							<table:template>
+								<Text text="{ui>Class}" />
+							</table:template>
+						</table:Column>
+						<table:Column width="18rem">
+							<Label text="{i18n>colSubClassName}" />
+							<table:template>
+								<Text text="{ui>SubClassName}" />
+							</table:template>
+						</table:Column>
+						<table:Column width="18rem">
+							<Label text="{i18n>colSubClassValue}" />
+							<table:template>
+								<Text text="{ui>SubClassValue}" />
+							</table:template>
+						</table:Column>
+						<table:Column width="17rem">
+							<Label text="{i18n>filterCabinConfig}" />
+							<table:template>
+								<Text text="{ui>CabinConfiguration}" />
+							</table:template>
+						</table:Column>
+						<table:Column width="17rem">
+							<Label text="{i18n>filterOwnedBy}" />
+							<table:template>
+								<Text text="{ui>EquipmentOwnedBy}" />
+							</table:template>
+						</table:Column>
+						<table:Column width="16rem">
+							<Label text="{i18n>filterOdometer}" />
+							<table:template>
+								<Text text="{ui>OdometerReading}" />
+							</table:template>
+						</table:Column>
+						<table:Column width="20rem">
+							<Label text="{i18n>colStartUpGeneralData}" />
+							<table:template>
+								<Text text="{ui>StartUpDate}" />
+							</table:template>
+						</table:Column>
+						<table:Column width="24rem">
+							<Label text="{i18n>colSerialNoGeneralData}" />
+							<table:template>
+								<Text text="{ui>ManufacturerSerialNumber}" />
+							</table:template>
+						</table:Column>
+						<table:Column width="22rem">
+							<Label text="{i18n>colTechnicalIdGeneralData}" />
+							<table:template>
+								<Text text="{ui>TechnicalID}" />
+							</table:template>
+						</table:Column>
+					</table:columns>
+				</table:TreeTable>
+				</Panel>
 
 			</FlexBox>
 		</f:content>

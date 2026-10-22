@@ -90,13 +90,9 @@ sap.ui.define([
 				pagePrevEnabled: false,
 				pageNextEnabled: false,
 
-				// caption above each card's object number (Equipment / Functional Location)
-				objectLabel: "",
-
-				// view switch (table | list) + list-view options
-				viewMode: "list",
+				// hierarchical result rows for the tree table
 				showEmpty: false,
-				listRows: [],
+				treeRows: [],
 
 				// characteristic filter options (populated when a class is selected)
 				charcOptions: [],
@@ -104,8 +100,12 @@ sap.ui.define([
 				// planner-group filter options (populated from the loaded class objects)
 				plannerOptions: [],
 				plannerBusy: false,
+				cabinConfigOptions: [],
+				equipmentOwnedByOptions: [],
+				charcValueOptions: [],
+				charcValueBusy: false,
 
-				// sorting (mirrored from the page context for the list-view buttons)
+				// sorting options for visible report columns
 				sortFields: [],
 				sortField: "",
 				sortDesc: false,
@@ -163,7 +163,7 @@ sap.ui.define([
 					// header read separately ($expand on the value view dumps on the DB).
 					// Equipment is time-dependent (key includes ValidityEndDate).
 					headerSet: "/Equipment",
-					headerSelect: "Equipment,EquipmentName,MaintenancePlant,ValidityEndDate,ManufacturerSerialNumber,OperationStartDate,MaintenancePlannerGroup,FunctionalLocationLabelName,FunctionalLocationName,SuperordinateEquipment",
+					headerSelect: "Equipment,EquipmentName,MaintenancePlant,ValidityEndDate,ManufacturerSerialNumber,OperationStartDate,MaintenancePlannerGroup,FunctionalLocationLabelName,FunctionalLocationName,SuperordinateEquipment,TechnicalObjectSortCode",
 					headerHasValidity: true,
 					// raw header field used by the Start-Up Date range filter
 					dateFilterField: "OperationStartDate",
@@ -172,7 +172,7 @@ sap.ui.define([
 					// single-call header fetch: expand the class->object navigation so
 					// one request returns every object's header data for the class.
 					headerExpandNav: "to_Equipment",
-					headerExpandSelect: "Equipment,to_Equipment/Equipment,to_Equipment/EquipmentName,to_Equipment/MaintenancePlant,to_Equipment/ValidityEndDate,to_Equipment/ManufacturerSerialNumber,to_Equipment/OperationStartDate,to_Equipment/MaintenancePlannerGroup,to_Equipment/FunctionalLocationLabelName,to_Equipment/FunctionalLocationName,to_Equipment/SuperordinateEquipment",
+					headerExpandSelect: "Equipment,to_Equipment/Equipment,to_Equipment/EquipmentName,to_Equipment/MaintenancePlant,to_Equipment/ValidityEndDate,to_Equipment/ManufacturerSerialNumber,to_Equipment/OperationStartDate,to_Equipment/MaintenancePlannerGroup,to_Equipment/FunctionalLocationLabelName,to_Equipment/FunctionalLocationName,to_Equipment/SuperordinateEquipment,to_Equipment/TechnicalObjectSortCode",
 					fixedColumns: [
 						{ key: "objNumber", label: oBundle.getText("colEquipment"), width: "11rem", get: function (sKey) { return sKey; } },
 						{ key: "objDesc", label: oBundle.getText("colDescription"), width: "18rem", get: function (sKey, oHeader) { return oHeader.EquipmentName; } },
@@ -239,81 +239,95 @@ sap.ui.define([
 		},
 
 		onClassChange: async function () {
-			var aIds = this.byId("classSelect").getSelectedKeys();
+			var sClassId = this.byId("classSelect").getSelectedKey();
 			var oUI = this._ui();
-			var bMulti = aIds.length > 1;
-			oUI.setProperty("/multiClass", bMulti);
-			if (bMulti) {
-				oUI.setProperty("/viewMode", "list");
-			}
+			var aIds = sClassId ? [sClassId] : [];
+			this._resetResults();
+			var iToken = this._filterClassLoadToken;
+			oUI.setProperty("/classId", sClassId || "");
+			oUI.setProperty("/classIds", aIds);
+			oUI.setProperty("/multiClass", false);
 
-			// the characteristic filter belongs to the previous class set — reset it
-			var oCharc = this.byId("charcSelect");
-			if (oCharc) {
-				oCharc.setSelectedKeys([]);
-			}
-			oUI.setProperty("/charcOptions", []);
-			// the planner-group options come from the previous class's objects — reset
-			var oPlanner = this.byId("plannerFilter");
-			if (oPlanner && oPlanner.setSelectedKeys) {
-				oPlanner.setSelectedKeys([]);
-			}
-			oUI.setProperty("/plannerOptions", []);
-
-			// nothing selected -> dependent filters cleared, done
 			if (!aIds.length) {
 				oUI.setProperty("/charcBusy", false);
-				oUI.setProperty("/plannerBusy", false);
 				return;
 			}
 
-			// Build the dependent filters for the selected class(es) immediately,
-			// without waiting for Go: the Characteristic list (from the class
-			// definition) and the Planner Group list (distinct values from the class
-			// objects). A token guards the rapid selectionChange events fired while
-			// ticking several classes.
-			var that = this;
-			var sClassType = this.byId("classTypeSelect").getSelectedKey();
-			var oCfg = this._typeConfig(sClassType);
-			var aAllClasses = oUI.getProperty("/classes") || [];
-			var aClasses = aIds.map(function (sId) {
-				var oC = aAllClasses.filter(function (c) { return c.ClassInternalID === sId; })[0];
-				return oC ? { ClassInternalID: oC.ClassInternalID, Class: oC.Class, ClassType: sClassType } : null;
-			}).filter(Boolean);
-
-			var iToken = (this._depLoadToken = (this._depLoadToken || 0) + 1);
+			var aClasses = (oUI.getProperty("/classes") || []).filter(function (oClass) {
+				return oClass.ClassInternalID === sClassId;
+			});
+			if (!aClasses.length) {
+				this._showError(this._bundle().getText("classNotFound"));
+				return;
+			}
+			var oCfg = this._typeConfig("002");
 			oUI.setProperty("/charcBusy", true);
-			oUI.setProperty("/plannerBusy", true);
-
-			var pChars = this._fetchUnionCharacteristics(aIds).then(function (oUnion) {
-				if (iToken !== that._depLoadToken) { return; }
+			try {
+				var oUnion = await this._fetchUnionCharacteristics(aIds);
+				if (iToken !== this._filterClassLoadToken) { return; }
+				this._filterClassCtx = {
+					oCfg: oCfg,
+					sClassId: sClassId,
+					aChars: oUnion.chars,
+					mMeta: oUnion.meta
+				};
 				oUI.setProperty("/charcOptions", oUnion.chars.map(function (oChar) {
 					return { key: oChar.CharcInternalID, text: oChar.Characteristic };
 				}));
-			}).catch(function () { /* non-fatal */ }).then(function () {
-				if (iToken === that._depLoadToken) { oUI.setProperty("/charcBusy", false); }
-			});
+				var mOptions = await this._loadNamedCharacteristicOptions(oCfg, sClassId, oUnion);
+				if (iToken !== this._filterClassLoadToken) { return; }
+				oUI.setProperty("/cabinConfigOptions", mOptions.cabinConfiguration);
+				oUI.setProperty("/equipmentOwnedByOptions", mOptions.equipmentOwnedBy);
+			} catch (oError) {
+				if (iToken === this._filterClassLoadToken) {
+					this._showError(this._bundle().getText("dataLoadError", [this._extractError(oError)]));
+				}
+			} finally {
+				if (iToken === this._filterClassLoadToken) {
+					oUI.setProperty("/charcBusy", false);
+				}
+			}
+		},
 
-			var pPlanner = ((oCfg && oCfg.headerExpandNav && aClasses.length)
-				? this._fetchPlannerOptions(oCfg, aClasses, sClassType)
-				: Promise.resolve([])).then(function (aOpts) {
-				if (iToken !== that._depLoadToken) { return; }
-				oUI.setProperty("/plannerOptions", aOpts);
-			}).catch(function () { /* non-fatal */ }).then(function () {
-				if (iToken === that._depLoadToken) { oUI.setProperty("/plannerBusy", false); }
-			});
-
-			await Promise.all([pChars, pPlanner]);
+		onSubClassChange: async function () {
+			var oUI = this._ui();
+			var aIds = this.byId("charcSelect").getSelectedKeys();
+			oUI.setProperty("/charcValueOptions", []);
+			var oValueFilter = this.byId("charcValueFilter");
+			if (oValueFilter) {
+				oValueFilter.setSelectedKeys([]);
+			}
+			var iToken = (this._subClassLoadToken = (this._subClassLoadToken || 0) + 1);
+			if (!aIds.length || !this._filterClassCtx) {
+				oUI.setProperty("/charcValueBusy", false);
+				return;
+			}
+			try {
+				oUI.setProperty("/charcValueBusy", true);
+				var aOptions = await this._loadCharacteristicValueOptions(this._filterClassCtx, aIds);
+				if (iToken === this._subClassLoadToken) {
+					oUI.setProperty("/charcValueOptions", aOptions);
+				}
+			} catch (oError) {
+				if (iToken === this._subClassLoadToken) {
+					this._showError(this._bundle().getText("dataLoadError", [this._extractError(oError)]));
+				}
+			} finally {
+				if (iToken === this._subClassLoadToken) {
+					oUI.setProperty("/charcValueBusy", false);
+				}
+			}
 		},
 
 		onClearPress: function () {
 			var oUI = this._ui();
 			oUI.setProperty("/classIds", []);
+			oUI.setProperty("/classId", "");
 			oUI.setProperty("/multiClass", false);
 			// clear the Class field's own selection + any typed text
 			var oClass = this.byId("classSelect");
 			if (oClass) {
-				if (oClass.setSelectedKeys) { oClass.setSelectedKeys([]); }
+				if (oClass.setSelectedKey) { oClass.setSelectedKey(""); }
 				if (oClass.setValue) { oClass.setValue(""); }
 			}
 			this._resetResults();
@@ -321,8 +335,9 @@ sap.ui.define([
 
 		onGoPress: function () {
 			var oUI = this._ui();
-			var sClassType = this.byId("classTypeSelect").getSelectedKey();
-			var aClassIds = this.byId("classSelect").getSelectedKeys();
+			var sClassType = "002";
+			var sClassId = this.byId("classSelect").getSelectedKey();
+			var aClassIds = sClassId ? [sClassId] : [];
 
 			this._hideError();
 
@@ -566,7 +581,7 @@ sap.ui.define([
 		 */
 		_searchObject: async function (sNum) {
 			var oUI = this._ui();
-			var sType = this.byId("classTypeSelect").getSelectedKey();
+			var sType = "002";
 			var oCfg = this._typeConfig(sType);
 
 			this._hideError();
@@ -650,8 +665,8 @@ sap.ui.define([
 					keys: aKeys,
 					headers: mHeaders,
 					classByKey: mClassByKey,
-					sortVals: this._buildSortVals(oCfg, aKeys, mHeaders, oContext),
-					sortField: oCfg.fixedColumns[0].key,
+					sortVals: this._buildSortVals(oCfg, aKeys, mHeaders, oContext, oUnion.chars),
+					sortField: "TechnicalObject",
 					sortDesc: false
 				};
 
@@ -671,7 +686,7 @@ sap.ui.define([
 		_searchObjects: async function (aNums) {
 			var oUI = this._ui();
 			var that = this;
-			var sType = this.byId("classTypeSelect").getSelectedKey();
+			var sType = "002";
 			var oCfg = this._typeConfig(sType);
 
 			this._hideError();
@@ -698,7 +713,7 @@ sap.ui.define([
 
 				if (!aAssign.length) {
 					oUI.setProperty("/rows", []);
-					oUI.setProperty("/listRows", []);
+					oUI.setProperty("/treeRows", []);
 					oUI.setProperty("/showTable", false);
 					oUI.setProperty("/showNoData", true);
 					oUI.setProperty("/noDataTitle", this._bundle().getText("objectNotFound", [aNums.join(", ")]));
@@ -743,8 +758,8 @@ sap.ui.define([
 					classByKey: mClassByKey,
 					keys: aResolved,
 					headers: mHeaders,
-					sortVals: this._buildSortVals(oCfg, aResolved, mHeaders, oContext),
-					sortField: oCfg.fixedColumns[0].key,
+					sortVals: this._buildSortVals(oCfg, aResolved, mHeaders, oContext, oUnion.chars),
+					sortField: "TechnicalObject",
 					sortDesc: false
 				};
 
@@ -817,13 +832,13 @@ sap.ui.define([
 			oDialog.open();
 		},
 
-		/** "Show empty characteristics" toggled — rebuild the cards for the page. */
+		/** "Show empty characteristics" toggled — rebuild the tree for the page. */
 		onShowEmptyChange: function () {
 			if (!this._pageCtx) {
 				return;
 			}
 			var aRows = this._ui().getProperty("/rows") || [];
-			this._ui().setProperty("/listRows", this._buildListRows(aRows, this._pageCtx.aChars, this._pageCtx.mMeta));
+			this._ui().setProperty("/treeRows", this._buildTreeRows(aRows, this._pageCtx.aChars));
 		},
 
 		onPrevPage: function () {
@@ -844,17 +859,27 @@ sap.ui.define([
 		},
 
 		/**
-		 * Export EVERY object in the current selection (all pages, all
-		 * characteristics) to a spreadsheet. The characteristic values are fetched in
-		 * batches of EXPORT_BATCH_SIZE objects so S/4HANA never has to materialise the
-		 * whole class at once; a modal progress dialog reports each batch and can be
-		 * cancelled.
+		 * Export EVERY object in the current selection (all pages) using the visible
+		 * report columns. Values are fetched in batches of EXPORT_BATCH_SIZE objects
+		 * so S/4HANA never has to materialise the whole class at once; a modal
+		 * progress dialog reports each batch and can be cancelled.
 		 */
 		onExport: async function () {
 			var that = this;
 			var oBundle = this._bundle();
 			var ctx = this._pageCtx;
-			var aColumns = this._ui().getProperty("/columnConfig") || [];
+			var oTable = this.byId("equipmentTreeTable");
+			var aColumns = oTable.getColumns().filter(function (oColumn) {
+				return oColumn.getVisible();
+			}).map(function (oColumn) {
+				var oTemplate = oColumn.getTemplate();
+				var oBinding = oTemplate && oTemplate.getBindingInfo("text");
+				var oLabel = oColumn.getLabel();
+				return {
+					label: oLabel.getText(),
+					property: oBinding.parts[0].path
+				};
+			});
 
 			if (!ctx || !ctx.keys || !ctx.keys.length) {
 				MessageToast.show(oBundle.getText("nothingToExport"));
@@ -918,14 +943,22 @@ sap.ui.define([
 			oStatus.setText(oBundle.getText("exportBuilding"));
 			oDialog.getBeginButton().setEnabled(false);
 
+			var aExportRows = [];
+			this._buildTreeRows(aRows, ctx.aChars).forEach(function (oRow) {
+				aExportRows.push(oRow);
+				(oRow.children || []).forEach(function (oChild) {
+					aExportRows.push(oChild);
+				});
+			});
+
 			var oSheet = new Spreadsheet({
 				workbook: {
 					columns: aColumns.map(function (c) {
 						return { label: c.label, property: c.property, type: EdmType.String };
 					})
 				},
-				dataSource: aRows,
-				fileName: "CharacteristicsReport.xlsx"
+				dataSource: aExportRows,
+				fileName: "CFAVehicleReport.xlsx"
 			});
 			oSheet.build().finally(function () {
 				oSheet.destroy();
@@ -978,7 +1011,7 @@ sap.ui.define([
 		_loadResults: async function (oCfg, aClasses) {
 			var oUI = this._ui();
 			var that = this;
-			var sClassType = this.byId("classTypeSelect").getSelectedKey();
+			var sClassType = "002";
 			var aClassIds = aClasses.map(function (c) { return c.ClassInternalID; });
 			var sClassKey = aClassIds.slice().sort().join(",");
 
@@ -1030,8 +1063,8 @@ sap.ui.define([
 					allKeys: aAllKeys,
 					keys: aAllKeys.slice(),
 					headers: mHeaders,
-					sortVals: this._buildSortVals(oCfg, aAllKeys, mHeaders, oContext),
-					sortField: oCfg.fixedColumns[0].key,
+					sortVals: this._buildSortVals(oCfg, aAllKeys, mHeaders, oContext, oUnion.chars),
+					sortField: "TechnicalObject",
 					sortDesc: false
 				};
 
@@ -1042,9 +1075,6 @@ sap.ui.define([
 				// present in the loaded class(es), so the dropdown only offers real values.
 				oUI.setProperty("/plannerOptions", this._distinctHeaderValues(mHeaders, aAllKeys, "MaintenancePlannerGroup"));
 				oUI.setProperty("/multiClass", bMulti);
-				if (bMulti) {
-					oUI.setProperty("/viewMode", "list");
-				}
 
 				await this._applyAllFilters();
 			} catch (oError) {
@@ -1059,7 +1089,7 @@ sap.ui.define([
 
 			// when the class changes, clear the (now class-specific) filters
 			if (!this._pageCtx || this._pageCtx.sClassId !== sClassId ||
-				this._pageCtx.sClassType !== this.byId("classTypeSelect").getSelectedKey()) {
+				this._pageCtx.sClassType !== "002") {
 				this._clearFilters();
 			}
 
@@ -1069,7 +1099,7 @@ sap.ui.define([
 			oUI.setProperty("/tableBusy", true);
 
 			try {
-				var sClassType = this.byId("classTypeSelect").getSelectedKey();
+				var sClassType = "002";
 				var aChars = await this._fetchCharacteristics(sClassId);
 				var mMeta = await this._fetchCharcMetadata(aChars);
 				this._buildColumns(aChars, oCfg);
@@ -1091,8 +1121,8 @@ sap.ui.define([
 					allKeys: aKeys,
 					keys: aKeys.slice(),
 					headers: mHeaders,
-					sortVals: this._buildSortVals(oCfg, aKeys, mHeaders, oContext),
-					sortField: oCfg.fixedColumns[0].key,
+					sortVals: this._buildSortVals(oCfg, aKeys, mHeaders, oContext, aChars),
+					sortField: "TechnicalObject",
 					sortDesc: false
 				};
 
@@ -1125,33 +1155,17 @@ sap.ui.define([
 		 * (matched in memory against the keys we already hold) AND characteristic-value
 		 * conditions (resolved server-side), then sort + show page 1.
 		 */
-		/** Clear EVERY filter-bar field — tokens, selections, typed-but-uncommitted
-		 *  text and the date control. (Tokens and typed text are independent on a
-		 *  MultiInput, so both must be cleared.) */
+		/** Clear all values in the visible report filters. */
 		_clearFilters: function () {
 			var that = this;
 
-			// MultiInput fields: committed tokens AND typed-but-uncommitted text
-			["objectSearch", "charcValueSearch", "serialFilter", "superiorFilter"].forEach(function (sId) {
-				var oCtrl = that.byId(sId);
-				if (!oCtrl) { return; }
-				if (oCtrl.removeAllTokens) { oCtrl.removeAllTokens(); }
-				if (oCtrl.setValue) { oCtrl.setValue(""); }
-			});
-
-			// MultiComboBox dropdowns: selection AND any typed text
-			["charcSelect", "plannerFilter"].forEach(function (sId) {
+			["cabinConfigFilter", "equipmentOwnedByFilter", "charcSelect", "charcValueFilter"].forEach(function (sId) {
 				var oCtrl = that.byId(sId);
 				if (!oCtrl) { return; }
 				if (oCtrl.setSelectedKeys) { oCtrl.setSelectedKeys([]); }
 				if (oCtrl.setValue) { oCtrl.setValue(""); }
 			});
 
-			// Start-Up Date (DynamicDateRange)
-			var oStartUp = this.byId("startupFilter");
-			if (oStartUp && oStartUp.setValue) {
-				oStartUp.setValue(null);
-			}
 		},
 
 		_applyAllFilters: async function () {
@@ -1165,43 +1179,35 @@ sap.ui.define([
 			try {
 				var aKeys = (ctx.allKeys || []).slice();
 
-				// object-number conditions (range / equals / contains) — match in memory
-				var aObjConds = this._tokenConditions(this.byId("objectSearch"));
-				if (aObjConds.length) {
-					aKeys = aKeys.filter(function (sKey) {
-						return aObjConds.some(function (oCond) { return this._matchCondition(sKey, oCond); }, this);
-					}, this);
+				var aNamedFilters = [
+					{ controlId: "cabinConfigFilter", characteristic: "Cabin Configuration" },
+					{ controlId: "equipmentOwnedByFilter", characteristic: "Equipment Owned by" }
+				];
+				for (var i = 0; i < aNamedFilters.length; i++) {
+					var oFilter = aNamedFilters[i];
+					var aValues = this._selectedKeys(oFilter.controlId);
+					var sCharcId = this._findCharacteristicId(ctx.aChars, oFilter.characteristic);
+					if (aValues.length && sCharcId) {
+						var oNamedSet = await this._resolveValueKeys(ctx, aValues.map(function (sValue) {
+							return { operation: "EQ", value1: sValue };
+						}), [sCharcId]);
+						aKeys = aKeys.filter(function (sKey) { return !!oNamedSet[sKey]; });
+					}
 				}
 
-				// header-level field filters (serial no., superior object, planner
-				// group, start-up date) — matched in memory against the loaded headers
-				aKeys = this._applyHeaderFilters(aKeys);
-
-				// characteristic-value conditions — resolved server-side
-				var aAllValConds = this._tokenConditions(this.byId("charcValueSearch"));
-				var oCharcSelect = this.byId("charcSelect");
-				var aCharcIds = oCharcSelect ? oCharcSelect.getSelectedKeys() : [];
-
-				// empty / not-empty conditions filter by whether the characteristic HAS a
-				// value (polarity from the exclude flag). They need a characteristic to be
-				// meaningful, so are ignored when none is selected.
-				var aEmptyConds = aAllValConds.filter(function (c) { return c.operation === "Empty"; });
-				var aValConds = aAllValConds.filter(function (c) { return c.operation !== "Empty"; });
-
-				if (aValConds.length) {
-					var oSet = await this._resolveValueKeys(ctx, aValConds, aCharcIds);
-					aKeys = aKeys.filter(function (sKey) { return oSet[sKey]; });
-				}
-				if (aEmptyConds.length && aCharcIds.length) {
-					var oHasVal = await this._resolveHasValueKeys(ctx, aCharcIds, aKeys);
-					aEmptyConds.forEach(function (oCond) {
-						aKeys = aKeys.filter(function (sKey) {
-							return oCond.exclude ? !!oHasVal[sKey] : !oHasVal[sKey];
-						});
-					});
+				var aCharcIds = this._selectedKeys("charcSelect");
+				var aCharcValues = this._selectedKeys("charcValueFilter");
+				if (aCharcIds.length) {
+					var oCharcSet = aCharcValues.length
+						? await this._resolveValueKeys(ctx, aCharcValues.map(function (sValue) {
+							return { operation: "EQ", value1: sValue };
+						}), aCharcIds)
+						: await this._resolveHasValueKeys(ctx, aCharcIds, aKeys);
+					aKeys = aKeys.filter(function (sKey) { return !!oCharcSet[sKey]; });
 				}
 
 				ctx.keys = aKeys;
+				await this._ensureReportSortValues(ctx, ctx.sortField);
 				this._sortKeys();
 				await this._loadPage(0);
 			} catch (oError) {
@@ -1264,92 +1270,67 @@ sap.ui.define([
 			}
 		},
 
-		/** Read + trim the string value of a filter-bar input by id. */
-		_filterVal: function (sId) {
-			var oCtrl = this.byId(sId);
-			return (oCtrl && oCtrl.getValue) ? (oCtrl.getValue() || "").trim() : "";
+		_selectedKeys: function (sControlId) {
+			var oControl = this.byId(sControlId);
+			return oControl && oControl.getSelectedKeys ? oControl.getSelectedKeys() : [];
 		},
 
-		/**
-		 * Apply the header-level field filters (Manufacturer Serial Number, Superior
-		 * Technical Object, Planner Group and Start-Up Date range) to the working key
-		 * list. All four are matched in memory against the headers we already hold —
-		 * the text fields via the pre-computed display values (sortVals), the date via
-		 * the raw header field — so this is cheap and needs no server round-trip.
-		 * @param {string[]} aKeys candidate object keys
-		 * @returns {string[]} keys that pass every active header filter
-		 */
-		_applyHeaderFilters: function (aKeys) {
-			var ctx = this._pageCtx;
-			if (!ctx) {
-				return aKeys;
+		_findCharacteristicId: function (aChars, sName) {
+			var sExpected = String(sName || "").trim().toLowerCase();
+			var oChar = (aChars || []).filter(function (oItem) {
+				return String(oItem.Characteristic || "").trim().toLowerCase() === sExpected;
+			})[0];
+			return oChar ? oChar.CharcInternalID : "";
+		},
+
+		_loadNamedCharacteristicOptions: async function (oCfg, sClassId, oUnion) {
+			var aPairs = [
+				{ name: "Cabin Configuration", property: "cabinConfiguration" },
+				{ name: "Equipment Owned by", property: "equipmentOwnedBy" }
+			];
+			var mOptions = {};
+			for (var i = 0; i < aPairs.length; i++) {
+				var oPair = aPairs[i];
+				var sCharcId = this._findCharacteristicId(oUnion.chars, oPair.name);
+				mOptions[oPair.property] = sCharcId
+					? await this._loadCharacteristicValueOptions({
+						oCfg: oCfg,
+						sClassId: sClassId,
+						mMeta: oUnion.meta
+					}, [sCharcId])
+					: [];
 			}
-			var mVals = ctx.sortVals || {};
-			var mHeaders = ctx.headers || {};
+			return mOptions;
+		},
+
+		_loadCharacteristicValueOptions: async function (ctx, aCharcIds) {
 			var that = this;
-
-			// each text field narrows the set; within a field, ANY condition matches
-			function textTokenFilter(aIn, sId, sColKey) {
-				var aConds = that._tokenConditions(that.byId(sId));
-				if (!aConds.length) {
-					return aIn;
-				}
-				return aIn.filter(function (sKey) {
-					var v = (mVals[sKey] && mVals[sKey][sColKey]) || "";
-					return aConds.some(function (oCond) { return that._matchCondition(v, oCond); });
+			var oModel = this._model(ctx.oCfg.modelName);
+			var aResponses = await Promise.all(aCharcIds.map(function (sCharcId) {
+				return that._read(oModel, ctx.oCfg.valueSet, {
+					"$filter": ctx.oCfg.filterField + " eq '" + that._esc(ctx.sClassId) +
+						"' and " + ctx.oCfg.charcIdField + " eq '" + that._esc(sCharcId) + "'",
+					"$select": ctx.oCfg.valueSelect,
+					"$top": MAX_VALUE_ROWS
+				}).then(function (aRows) { return { charcId: sCharcId, rows: aRows }; });
+			}));
+			var oSeen = {};
+			aResponses.forEach(function (oResponse) {
+				oResponse.rows.forEach(function (oRow) {
+					if (oRow.ClassInternalID !== ctx.sClassId) {
+						return;
+					}
+					var sValue = that._formatCellValue(oRow, ctx.mMeta[oResponse.charcId]);
+					if (sValue) {
+						oSeen[sValue] = true;
+					}
 				});
-			}
-
-			aKeys = textTokenFilter(aKeys, "serialFilter", "ManufacturerSerialNumber");
-			aKeys = textTokenFilter(aKeys, "superiorFilter", "SuperiorObject");
-
-			// Planner Group — multi-select dropdown; keep objects whose planner group
-			// is any of the selected codes (exact match)
-			var oPlanner = this.byId("plannerFilter");
-			var aPlanner = (oPlanner && oPlanner.getSelectedKeys) ? oPlanner.getSelectedKeys() : [];
-			if (aPlanner.length) {
-				var oPlannerSet = {};
-				aPlanner.forEach(function (k) { oPlannerSet[k] = true; });
-				aKeys = aKeys.filter(function (sKey) {
-					var v = (mVals[sKey] && mVals[sKey].MaintenancePlannerGroup) || "";
-					return oPlannerSet[v];
-				});
-			}
-
-			// Start-Up Date — sap.m.DynamicDateRange (Today / Last X days / range / ...)
-			var oDDR = this.byId("startupFilter");
-			var oDDRValue = (oDDR && oDDR.getValue) ? oDDR.getValue() : null;
-			if (oDDRValue) {
-				// Picker-selected values resolve via the standard helper. Free-typed text
-				// the control can't parse comes back as operator "PARSEERROR" (which makes
-				// toDates throw), so fall back to our own day-first parser that accepts
-				// / . and - . Either way a date-filter issue never aborts the load.
-				var aBounds = null;
-				if (oDDRValue.operator !== "PARSEERROR") {
-					try { aBounds = DynamicDateRange.toDates(oDDRValue); } catch (e) { aBounds = null; }
-				}
-				if (!aBounds || !aBounds.length) {
-					var aVals = oDDRValue.values || [];
-					var oTyped = this._parseFilterDate(aVals[aVals.length - 1]);
-					if (oTyped) { aBounds = [oTyped, oTyped]; }
-				}
-				if (aBounds && aBounds.length) {
-					var ms = function (d) { return d.getJSDate ? d.getJSDate().getTime() : d.getTime(); };
-					var nFromDay = this._dayFloor(ms(aBounds[0]));
-					var nToDay = this._dayFloor(ms(aBounds[aBounds.length - 1]));
-					var sDateField = ctx.oCfg.dateFilterField || "OperationStartDate";
-					aKeys = aKeys.filter(function (sKey) {
-						var raw = mHeaders[sKey] && mHeaders[sKey][sDateField];
-						if (!that._has(raw)) {
-							return false;
-						}
-						var vDay = that._dayFloor(that._epoch(raw));
-						return vDay >= nFromDay && vDay <= nToDay;
-					});
-				}
-			}
-
-			return aKeys;
+			});
+			return Object.keys(oSeen).sort(function (a, b) {
+				return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+			}).map(function (sValue) {
+				return { key: sValue, text: sValue };
+			});
 		},
 
 		/** Distinct, sorted, non-empty values of a header field across the keys,
@@ -1621,7 +1602,7 @@ sap.ui.define([
 		 * so sorting the whole class is a cheap client-side compare.
 		 * @returns {object} map objectKey -> { fixedColumnKey: value }
 		 */
-		_buildSortVals: function (oCfg, aKeys, mHeaders, oContext) {
+		_buildSortVals: function (oCfg, aKeys, mHeaders, oContext, aChars) {
 			var mSortVals = {};
 			aKeys.forEach(function (sKey) {
 				var oHeader = mHeaders[sKey] || {};
@@ -1630,8 +1611,22 @@ sap.ui.define([
 					var v = oFixed.get(sKey, oHeader, null, oContext);
 					o[oFixed.key] = (v === undefined || v === null) ? "" : String(v);
 				});
+				o.TechnicalObject = o.objNumber || "";
+				o.TechnicalObjectDescription = o.objDesc || "";
+				o.VehicleAge = this._vehicleAge(oHeader.OperationStartDate);
+				o.Class = o.objClass || "";
+				o.SubClassName = (aChars || []).map(function (oChar) {
+					return oChar.Characteristic || "";
+				}).join(", ");
+				o.SubClassValue = "";
+				o.CabinConfiguration = "";
+				o.EquipmentOwnedBy = "";
+				o.OdometerReading = "";
+				o.StartUpDate = String(this._epoch(oHeader.OperationStartDate) || "");
+				o.ManufacturerSerialNumber = oHeader.ManufacturerSerialNumber || "";
+				o.TechnicalID = oHeader.TechnicalObjectSortCode || "";
 				mSortVals[sKey] = o;
-			});
+			}, this);
 			return mSortVals;
 		},
 
@@ -1655,21 +1650,97 @@ sap.ui.define([
 		},
 
 		/** Apply a sort field/direction across the whole class and reload page 1. */
-		_setSort: function (sField, bDesc) {
+		_setSort: async function (sField, bDesc) {
 			var ctx = this._pageCtx;
 			if (!ctx) {
 				return;
 			}
+			var oUI = this._ui();
 			ctx.sortField = sField;
 			ctx.sortDesc = !!bDesc;
-			this._ui().setProperty("/sortField", sField);
-			this._ui().setProperty("/sortDesc", !!bDesc);
-			this._sortKeys();
-			this._reflectSortOnColumns();
-			this._loadPage(0);
+			oUI.setProperty("/sortField", sField);
+			oUI.setProperty("/sortDesc", !!bDesc);
+			oUI.setProperty("/tableBusy", true);
+			try {
+				await this._ensureReportSortValues(ctx, sField);
+				this._sortKeys();
+				this._reflectSortOnColumns();
+				await this._loadPage(0);
+			} catch (oError) {
+				this._showError(this._bundle().getText("dataLoadError", [this._extractError(oError)]));
+			} finally {
+				oUI.setProperty("/tableBusy", false);
+			}
 		},
 
-		/** List-view sort button: sort by its field, toggling direction if re-clicked. */
+		_ensureReportSortValues: async function (ctx, sField) {
+			var aChars = ctx.aChars || [];
+			var aRelevantIds = [];
+			if (sField === "SubClassValue") {
+				aRelevantIds = aChars.map(function (oChar) { return oChar.CharcInternalID; });
+			} else if (sField === "CabinConfiguration") {
+				aRelevantIds = [this._findCharacteristicId(aChars, "Cabin Configuration")].filter(Boolean);
+			} else if (sField === "OdometerReading") {
+				aRelevantIds = [this._findCharacteristicId(aChars, "Odometer Reading")].filter(Boolean);
+			} else {
+				return;
+			}
+			if (!aRelevantIds.length) {
+				return;
+			}
+			var mValues = ctx.reportCharValues || (ctx.reportCharValues = {});
+			var mFetched = ctx.reportCharValueIds || (ctx.reportCharValueIds = {});
+			var aKeysToFetch = (ctx.keys || []).filter(function (sKey) {
+				return aRelevantIds.some(function (sId) { return !mFetched[sKey] || !mFetched[sKey][sId]; });
+			});
+			var aChunks = this._chunk(aKeysToFetch, 25);
+			for (var i = 0; i < aChunks.length; i++) {
+				var aRows = await this._fetchValuesForKeys(ctx.oCfg, aChunks[i], ctx.sClassId, ctx.classByKey);
+				aRows.forEach(function (oRow) {
+					var sObjectKey = oRow[ctx.oCfg.objectKeyField];
+					var sCharcId = oRow[ctx.oCfg.charcIdField];
+					if (aRelevantIds.indexOf(sCharcId) === -1) {
+						return;
+					}
+					var mObjectValues = mValues[sObjectKey] || (mValues[sObjectKey] = {});
+					var aCell = mObjectValues[sCharcId] || (mObjectValues[sCharcId] = []);
+					aCell.push({
+						position: parseInt(oRow.CharcValuePositionNumber, 10) || 0,
+						value: this._formatCellValue(oRow, ctx.mMeta[sCharcId])
+					});
+				}, this);
+				aChunks[i].forEach(function (sKey) {
+					mFetched[sKey] = mFetched[sKey] || {};
+					aRelevantIds.forEach(function (sId) { mFetched[sKey][sId] = true; });
+				});
+			}
+
+			var sCabinId = this._findCharacteristicId(aChars, "Cabin Configuration");
+			var sOwnerId = this._findCharacteristicId(aChars, "Equipment Owned by");
+			var sOdometerId = this._findCharacteristicId(aChars, "Odometer Reading");
+			(ctx.keys || []).forEach(function (sKey) {
+				var mObjectValues = mValues[sKey] || {};
+				function valueFor(sCharcId) {
+					if (!sCharcId || !mFetched[sKey] || !mFetched[sKey][sCharcId]) {
+						return "";
+					}
+					return (mObjectValues[sCharcId] || [])
+						.sort(function (a, b) { return a.position - b.position; })
+						.map(function (oItem) { return oItem.value; })
+						.filter(Boolean)
+						.join(", ");
+				}
+				var oSort = ctx.sortVals[sKey] || (ctx.sortVals[sKey] = {});
+				oSort.CabinConfiguration = valueFor(sCabinId);
+				oSort.EquipmentOwnedBy = valueFor(sOwnerId);
+				oSort.OdometerReading = valueFor(sOdometerId);
+				oSort.SubClassValue = aRelevantIds.map(function (sCharcId) {
+					return valueFor(sCharcId);
+				}).filter(Boolean).join(", ");
+			});
+		},
+
+		/** Sort by a visible report column, toggling direction when selected again. */
 		onSortFieldPress: function (oEvent) {
 			var ctx = this._pageCtx;
 			if (!ctx) {
@@ -1680,7 +1751,7 @@ sap.ui.define([
 			this._setSort(oItem.key, bDesc);
 		},
 
-		/** Open the sort dialog (drives sorting for both table and list views). */
+		/** Open the sort dialog for the visible report columns. */
 		onSortPress: function () {
 			var ctx = this._pageCtx;
 			if (!ctx) {
@@ -1691,11 +1762,11 @@ sap.ui.define([
 				this.getView().addDependent(this._oSortDialog);
 			}
 			this._oSortDialog.removeAllSortItems();
-			ctx.oCfg.fixedColumns.forEach(function (oFixed) {
+			(this._ui().getProperty("/sortFields") || []).forEach(function (oField) {
 				this._oSortDialog.addSortItem(new ViewSettingsItem({
-					key: oFixed.key,
-					text: oFixed.label,
-					selected: oFixed.key === ctx.sortField
+					key: oField.key,
+					text: oField.label,
+					selected: oField.key === ctx.sortField
 				}));
 			}, this);
 			this._oSortDialog.setSortDescending(!!ctx.sortDesc);
@@ -1708,11 +1779,9 @@ sap.ui.define([
 				return;
 			}
 			var oItem = oEvent.getParameter("sortItem");
-			ctx.sortField = oItem ? oItem.getKey() : ctx.oCfg.fixedColumns[0].key;
+			var sField = oItem ? oItem.getKey() : "TechnicalObject";
 			ctx.sortDesc = oEvent.getParameter("sortDescending");
-			this._sortKeys();
-			this._reflectSortOnColumns();
-			this._loadPage(0);
+			this._setSort(sField, ctx.sortDesc);
 		},
 
 		/** Reflect the active sort on the table column headers. */
@@ -1763,7 +1832,7 @@ sap.ui.define([
 
 				if (!aKeys.length) {
 					oUI.setProperty("/rows", []);
-					oUI.setProperty("/listRows", []);
+					oUI.setProperty("/treeRows", []);
 					oUI.setProperty("/showTable", false);
 					oUI.setProperty("/showNoData", true);
 					oUI.setProperty("/noDataTitle", this._bundle().getText("noDataTitle", [ctx.className]));
@@ -1783,7 +1852,7 @@ sap.ui.define([
 				var aRows = this._pivotData(aValues, ctx.aChars, ctx.mMeta, ctx.oCfg, oContext, mHeaders, aKeys);
 
 				oUI.setProperty("/rows", aRows);
-				oUI.setProperty("/listRows", this._buildListRows(aRows, ctx.aChars, ctx.mMeta));
+				oUI.setProperty("/treeRows", this._buildTreeRows(aRows, ctx.aChars));
 				oUI.setProperty("/showNoData", false);
 				oUI.setProperty("/showTable", true);
 				this._updatePagination(iPageIndex, iPageSize, iTotal);
@@ -2189,122 +2258,90 @@ sap.ui.define([
 		/* =========================================================== */
 
 		/**
-		 * Build the grouped card structure for the list view from the flat pivoted
-		 * rows. Characteristics are grouped by their characteristic group.
+		 * Build equipment rows with characteristic name/value children for the report.
 		 * @param {object[]} aRows pivoted rows
 		 * @param {object[]} aChars ordered characteristics
-		 * @param {object} mMeta characteristic metadata (group, unit)
-		 * @returns {object[]} list-view rows
+		 * @returns {object[]} tree-table rows
 		 */
-		_buildListRows: function (aRows, aChars, mMeta) {
-			var oCfg = this._pageCtx ? this._pageCtx.oCfg : null;
-			var aFixed = oCfg ? oCfg.fixedColumns : [];
-			var sDefaultGroup = this._bundle().getText("listDefaultGroup");
-			var sPopulated = this._bundle().getText("listPopulated");
+		_buildTreeRows: function (aRows, aChars) {
+			var mHeaders = this._pageCtx ? this._pageCtx.headers : {};
 			var bShowEmpty = !!this._ui().getProperty("/showEmpty");
+			var aSelectedCharcIds = this._selectedKeys("charcSelect");
+			var aSelectedValues = this._selectedKeys("charcValueFilter");
+			var sCabinId = this._findCharacteristicId(aChars, "Cabin Configuration");
+			var sOwnerId = this._findCharacteristicId(aChars, "Equipment Owned by");
+			var sOdometerId = this._findCharacteristicId(aChars, "Odometer Reading");
 
 			return aRows.map(function (oRow) {
+				var oHeader = mHeaders[oRow.objNumber] || {};
 				var oOut = {
-					objNumber: aFixed[0] ? oRow[aFixed[0].key] : "",
-					objDesc: aFixed[1] ? oRow[aFixed[1].key] : "",
-					objClass: aFixed[2] ? oRow[aFixed[2].key] : "",
-					masterFields: aFixed.slice(3).map(function (f) {
-						return { label: f.label, value: oRow[f.key] || "-" };
-					}),
-					groups: []
+					TechnicalObject: oRow.objNumber || "",
+					TechnicalObjectDescription: oRow.objDesc || "",
+					VehicleAge: this._vehicleAge(oHeader.OperationStartDate),
+					Class: oRow.objClass || "",
+					CabinConfiguration: sCabinId ? (oRow["C_" + sCabinId] || "") : "",
+					EquipmentOwnedBy: sOwnerId ? (oRow["C_" + sOwnerId] || "") : "",
+					OdometerReading: sOdometerId ? (oRow["C_" + sOdometerId] || "") : "",
+					StartUpDate: oRow.OperationStartDate || "",
+					ManufacturerSerialNumber: oRow.ManufacturerSerialNumber || "",
+					TechnicalID: oHeader.TechnicalObjectSortCode || "",
+					children: []
 				};
-
-				var oGroupMap = {};
-				var aGroupOrder = [];
+				var aChildren = [];
 				aChars.forEach(function (oChar) {
-					var oM = mMeta[oChar.CharcInternalID] || {};
-					var sGroup = oM.CharcGroupName || oM.CharcGroup || sDefaultGroup;
-					var oGroup = oGroupMap[sGroup];
-					if (!oGroup) {
-						oGroup = { name: sGroup, charcs: [], populated: 0, total: 0 };
-						oGroupMap[sGroup] = oGroup;
-						aGroupOrder.push(sGroup);
+					if (aSelectedCharcIds.length && aSelectedCharcIds.indexOf(oChar.CharcInternalID) === -1) {
+						return;
 					}
-					oGroup.total++;
 					var sVal = oRow["C_" + oChar.CharcInternalID] || "";
-					var bPop = sVal !== "";
-					if (bPop) {
-						oGroup.populated++;
-					}
-					// only build the cells that will actually render (big DOM saving)
-					if (bPop || bShowEmpty) {
-						oGroup.charcs.push({
-							label: oChar.Characteristic,
-							value: bPop ? sVal : "-",
-							unit: bPop ? (oM.CharcValueUnit || "") : "",
-							populated: bPop
+					if (aSelectedValues.length) {
+						var aMatchingValues = sVal.split(", ").filter(function (sValue) {
+							return aSelectedValues.indexOf(sValue) !== -1;
 						});
+						if (!aMatchingValues.length) {
+							return;
+						}
+						sVal = aMatchingValues.join(", ");
+					}
+					if (sVal || bShowEmpty) {
+						var oChild = Object.assign({}, oOut);
+						oChild.SubClassName = oChar.Characteristic;
+						oChild.SubClassValue = sVal || "-";
+						aChildren.push(oChild);
 					}
 				});
-
-				oOut.groups = aGroupOrder.map(function (s) {
-					var oGroup = oGroupMap[s];
-					oGroup.countText = oGroup.populated + "/" + oGroup.total + " " + sPopulated;
-					return oGroup;
-				}).filter(function (g) { return g.charcs.length > 0; });
+				var ctx = this._pageCtx;
+				if (ctx && (ctx.sortField === "SubClassName" || ctx.sortField === "SubClassValue")) {
+					var sSortField = ctx.sortField;
+					var bDesc = !!ctx.sortDesc;
+					aChildren.sort(function (a, b) {
+						var iOrder = (a[sSortField] || "").localeCompare(b[sSortField] || "", undefined, {
+							numeric: true,
+							sensitivity: "base"
+						});
+						return bDesc ? -iOrder : iOrder;
+					});
+				}
+				oOut.children = aChildren;
 				return oOut;
-			});
+			}, this);
 		},
 
-		_buildListRowsLegacy: function (aRows, aChars, mMeta) {
-			var oCfg = this._pageCtx ? this._pageCtx.oCfg : null;
-			var aFixed = oCfg ? oCfg.fixedColumns : [];
-			var sDefaultGroup = this._bundle().getText("listDefaultGroup");
-			var sPopulated = this._bundle().getText("listPopulated");
-
-			return aRows.map(function (oRow) {
-				var oOut = {
-					objNumber: aFixed[0] ? oRow[aFixed[0].key] : "",
-					objDesc: aFixed[1] ? oRow[aFixed[1].key] : "",
-					objClass: aFixed[2] ? oRow[aFixed[2].key] : "",
-					masterFields: aFixed.slice(3).map(function (f) {
-						return { label: f.label, value: oRow[f.key] || "-" };
-					}),
-					groups: []
-				};
-
-				var oGroupMap = {};
-				var aGroupOrder = [];
-				aChars.forEach(function (oChar) {
-					var oM = mMeta[oChar.CharcInternalID] || {};
-					var sGroup = oM.CharcGroupName || oM.CharcGroup || sDefaultGroup;
-					var oGroup = oGroupMap[sGroup];
-					if (!oGroup) {
-						oGroup = { name: sGroup, charcs: [], populated: 0 };
-						oGroupMap[sGroup] = oGroup;
-						aGroupOrder.push(sGroup);
-					}
-					var sVal = oRow["C_" + oChar.CharcInternalID] || "";
-					var bPop = sVal !== "";
-					oGroup.charcs.push({
-						label: oChar.Characteristic,
-						value: bPop ? sVal : "-",
-						unit: bPop ? (oM.CharcValueUnit || "") : "",
-						populated: bPop
-					});
-					if (bPop) {
-						oGroup.populated++;
-					}
-				});
-
-				oOut.groups = aGroupOrder.map(function (s) {
-					var oGroup = oGroupMap[s];
-					oGroup.total = oGroup.charcs.length;
-					oGroup.countText = oGroup.populated + "/" + oGroup.total + " " + sPopulated;
-					return oGroup;
-				});
-				return oOut;
-			});
+		_vehicleAge: function (vStartDate) {
+			if (!this._has(vStartDate)) {
+				return "";
+			}
+			var dStart = new Date(this._epoch(vStartDate));
+			var dToday = new Date();
+			var iAge = dToday.getUTCFullYear() - dStart.getUTCFullYear();
+			if (dToday.getUTCMonth() < dStart.getUTCMonth() ||
+				(dToday.getUTCMonth() === dStart.getUTCMonth() && dToday.getUTCDate() < dStart.getUTCDate())) {
+				iAge--;
+			}
+			return String(Math.max(0, iAge));
 		},
 
 		_buildColumns: function (aChars, oCfg) {
-			// The app is list-only; there is no grid to build. We still derive the
-			// column model used by the Excel export and the list-view sort fields.
+			// Keep the flat column model for spreadsheet export and sorting.
 			this._resultFilters = {};
 			this._globalSearch = "";
 
@@ -2322,14 +2359,13 @@ sap.ui.define([
 
 			this._ui().setProperty("/columnConfig", aColumnConfig);
 
-			// caption shown above the object number on each list card (Equipment vs
-			// Functional Location) — first fixed column carries the right label
-			this._ui().setProperty("/objectLabel", oCfg.fixedColumns[0].label);
-
-			// sortable fields (the fixed columns) for the list-view sort buttons
-			this._ui().setProperty("/sortFields", oCfg.fixedColumns.map(function (oFixed) {
-				return { key: oFixed.key, label: oFixed.label };
-			}));
+			// sortable fields used by the result toolbar
+			this._ui().setProperty("/sortFields", [
+				{ key: "TechnicalObject", label: this._bundle().getText("colTechnicalObject") },
+				{ key: "TechnicalObjectDescription", label: this._bundle().getText("colTechnicalObjectDescription") },
+				{ key: "VehicleAge", label: this._bundle().getText("colVehicleAge") },
+				{ key: "Class", label: this._bundle().getText("colClass") }
+			]);
 		},
 
 		/**
@@ -2703,8 +2739,10 @@ sap.ui.define([
 
 		_resetResults: function () {
 			var oUI = this._ui();
+			this._filterClassLoadToken = (this._filterClassLoadToken || 0) + 1;
+			this._subClassLoadToken = (this._subClassLoadToken || 0) + 1;
 			oUI.setProperty("/rows", []);
-			oUI.setProperty("/listRows", []);
+			oUI.setProperty("/treeRows", []);
 			oUI.setProperty("/columnConfig", []);
 			oUI.setProperty("/showTable", false);
 			oUI.setProperty("/showNoData", false);
@@ -2714,6 +2752,7 @@ sap.ui.define([
 			oUI.setProperty("/pagePrevEnabled", false);
 			oUI.setProperty("/pageNextEnabled", false);
 			this._pageCtx = null;
+			this._filterClassCtx = null;
 			this._currentPage = 0;
 			this._totalObjects = 0;
 			this._objectSearch = "";
@@ -2723,6 +2762,10 @@ sap.ui.define([
 			this._clearFilters();
 			oUI.setProperty("/charcOptions", []);
 			oUI.setProperty("/charcBusy", false);
+			oUI.setProperty("/charcValueOptions", []);
+			oUI.setProperty("/charcValueBusy", false);
+			oUI.setProperty("/cabinConfigOptions", []);
+			oUI.setProperty("/equipmentOwnedByOptions", []);
 			oUI.setProperty("/plannerOptions", []);
 			oUI.setProperty("/plannerBusy", false);
 			this._unionCache = null;

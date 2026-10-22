@@ -1,5 +1,5 @@
 _schema-version: "3.3.0"
-ID: cfa-characteristics-report
+ID: cfa-vehicle-report
 version: 1.0.0
 description: CFA Technical Object Characteristics Report - standalone approuter app
 
