@@ -47,15 +47,38 @@ sap.ui.define([
 	// Per-batch row cap: 100 objects x up to ~99 characteristics, with headroom.
 	var EXPORT_VALUE_ROWS = 20000;
 
-	// Module-level date formatter for the fixed-column getters. Those getters are
-	// invoked unbound (oFixed.get(...)) so they cannot reach this._formatDate — this
-	// closure-scoped helper formats SAP OData V2 /Date(ms)/ values for display.
-	var DATE_FMT = DateFormat.getDateInstance();
-	function fmtSAPDate(v) {
+	function fmtSAPDateISO(v) {
 		if (v === undefined || v === null || v === "") { return ""; }
-		if (v instanceof Date) { return DATE_FMT.format(v); }
-		var m = /\/Date\((-?\d+)/.exec(String(v));
-		return m ? DATE_FMT.format(new Date(parseInt(m[1], 10))) : String(v);
+		var sYear;
+		var sMonth;
+		var sDay;
+		if (v instanceof Date) {
+			sYear = v.getFullYear();
+			sMonth = v.getMonth() + 1;
+			sDay = v.getDate();
+		} else {
+			var sValue = String(v);
+			var mSAP = /\/Date\((-?\d+)/.exec(sValue);
+			var mISO = /^(\d{4})-?(\d{2})-?(\d{2})/.exec(sValue);
+			if (mSAP) {
+				var oDate = new Date(parseInt(mSAP[1], 10));
+				sYear = oDate.getUTCFullYear();
+				sMonth = oDate.getUTCMonth() + 1;
+				sDay = oDate.getUTCDate();
+			} else if (mISO) {
+				sYear = parseInt(mISO[1], 10);
+				sMonth = parseInt(mISO[2], 10);
+				sDay = parseInt(mISO[3], 10);
+			} else {
+				return "";
+			}
+		}
+		if (sMonth < 1 || sMonth > 12 || sDay < 1 || sDay > 31) {
+			return "";
+		}
+		return String(sYear).padStart(4, "0") + "-" +
+			String(sMonth).padStart(2, "0") + "-" +
+			String(sDay).padStart(2, "0");
 	}
 
 	return Controller.extend("com.cfa.charlist.controller.Main", {
@@ -183,7 +206,7 @@ sap.ui.define([
 							var sName = oHeader.FunctionalLocationName || "";
 							return (sLabel && sName) ? (sLabel + " (" + sName + ")") : sLabel;
 						} },
-						{ key: "OperationStartDate", label: oBundle.getText("colStartUp"), width: "10rem", get: function (sKey, oHeader) { return fmtSAPDate(oHeader.OperationStartDate); } },
+						{ key: "OperationStartDate", label: oBundle.getText("colStartUp"), width: "10rem", get: function (sKey, oHeader) { return fmtSAPDateISO(oHeader.OperationStartDate); } },
 						{ key: "MaintenancePlannerGroup", label: oBundle.getText("colPlannerGroup"), width: "9rem", get: function (sKey, oHeader) { return oHeader.MaintenancePlannerGroup; } },
 						{ key: "MaintenancePlant", label: oBundle.getText("colMaintPlant"), width: "9rem", get: function (sKey, oHeader) { return oHeader.MaintenancePlant; } }
 					]
@@ -1622,7 +1645,7 @@ sap.ui.define([
 				o.CabinConfiguration = "";
 				o.EquipmentOwnedBy = "";
 				o.OdometerReading = "";
-				o.StartUpDate = String(this._epoch(oHeader.OperationStartDate) || "");
+				o.StartUpDate = fmtSAPDateISO(oHeader.OperationStartDate);
 				o.ManufacturerSerialNumber = oHeader.ManufacturerSerialNumber || "";
 				o.TechnicalID = oHeader.TechnicalObjectSortCode || "";
 				mSortVals[sKey] = o;
@@ -2282,7 +2305,7 @@ sap.ui.define([
 					CabinConfiguration: sCabinId ? (oRow["C_" + sCabinId] || "") : "",
 					EquipmentOwnedBy: sOwnerId ? (oRow["C_" + sOwnerId] || "") : "",
 					OdometerReading: sOdometerId ? (oRow["C_" + sOdometerId] || "") : "",
-					StartUpDate: oRow.OperationStartDate || "",
+					StartUpDate: fmtSAPDateISO(oRow.OperationStartDate),
 					ManufacturerSerialNumber: oRow.ManufacturerSerialNumber || "",
 					TechnicalID: oHeader.TechnicalObjectSortCode || "",
 					children: []
@@ -2364,7 +2387,8 @@ sap.ui.define([
 				{ key: "TechnicalObject", label: this._bundle().getText("colTechnicalObject") },
 				{ key: "TechnicalObjectDescription", label: this._bundle().getText("colTechnicalObjectDescription") },
 				{ key: "VehicleAge", label: this._bundle().getText("colVehicleAge") },
-				{ key: "Class", label: this._bundle().getText("colClass") }
+				{ key: "Class", label: this._bundle().getText("colClass") },
+				{ key: "StartUpDate", label: this._bundle().getText("colStartUpGeneralData") }
 			]);
 		},
 
