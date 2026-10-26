@@ -36,3 +36,9 @@
 .cfaGroupHeader {
 	margin-bottom: 0.25rem;
 }
+
+/* sort buttons stay on one row with unwrapped text; the row scrolls if too wide */
+.cfaSortBtn {
+	flex: 0 0 auto;
+	white-space: nowrap;
+}

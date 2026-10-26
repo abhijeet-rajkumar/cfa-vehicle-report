@@ -2449,6 +2449,11 @@ sap.ui.define([
 				{ key: "TechnicalObjectDescription", label: this._bundle().getText("colTechnicalObjectDescription") },
 				{ key: "VehicleAge", label: this._bundle().getText("colVehicleAge") },
 				{ key: "Class", label: this._bundle().getText("colClass") },
+				{ key: "SubClassName", label: this._bundle().getText("colSubClassName") },
+				{ key: "SubClassValue", label: this._bundle().getText("colSubClassValue") },
+				{ key: "CabinConfiguration", label: this._bundle().getText("filterCabinConfig") },
+				{ key: "EquipmentOwnedBy", label: this._bundle().getText("filterOwnedBy") },
+				{ key: "OdometerReading", label: this._bundle().getText("filterOdometer") },
 				{ key: "StartUpDate", label: this._bundle().getText("colStartUpGeneralData") }
 			]);
 		},

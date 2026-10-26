@@ -165,12 +165,14 @@
 						<Button id="exportBtn" icon="sap-icon://excel-attachment" text="{i18n>exportButton}" tooltip="{i18n>exportButton}" press="onExport" />
 					</OverflowToolbar>
 
-				<OverflowToolbar class="sapUiTinyMarginBottom">
-					<Label text="{i18n>sortBy}" />
-					<HBox wrap="Wrap" items="{ path: 'ui>/sortFields', templateShareable: false }">
-						<Button text="{ui>label}" press="onSortFieldPress" type="{= ${ui>key} === ${ui>/sortField} ? 'Emphasized' : 'Transparent' }" icon="{= ${ui>key} === ${ui>/sortField} ? (${ui>/sortDesc} ? 'sap-icon://sort-descending' : 'sap-icon://sort-ascending') : 'sap-icon://sort' }" class="sapUiTinyMarginEnd" />
-					</HBox>
-				</OverflowToolbar>
+				<ScrollContainer horizontal="true" vertical="false" width="100%" class="sapUiTinyMarginBottom">
+					<FlexBox alignItems="Center" wrap="NoWrap">
+						<Label text="{i18n>sortBy}" class="sapUiTinyMarginEnd" />
+						<HBox wrap="NoWrap" items="{ path: 'ui>/sortFields', templateShareable: false }">
+							<Button text="{ui>label}" press="onSortFieldPress" type="{= ${ui>key} === ${ui>/sortField} ? 'Emphasized' : 'Transparent' }" icon="{= ${ui>key} === ${ui>/sortField} ? (${ui>/sortDesc} ? 'sap-icon://sort-descending' : 'sap-icon://sort-ascending') : 'sap-icon://sort' }" class="sapUiTinyMarginEnd cfaSortBtn" />
+						</HBox>
+					</FlexBox>
+				</ScrollContainer>
 				<table:TreeTable
 					id="equipmentTreeTable"
 					visible="{ui>/showTable}"
