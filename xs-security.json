@@ -1,7 +1,7 @@
 {
   "xsappname": "cfa-vehicle-report",
   "tenant-mode": "dedicated",
-  "description": "Security configuration for the CFA Technical Object Characteristics Report",
+  "description": "Security configuration for the CFA Vehicle Report",
   "scopes": [],
   "attributes": [],
   "role-templates": [],

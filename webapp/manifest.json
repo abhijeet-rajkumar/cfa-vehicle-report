@@ -1,7 +1,7 @@
 {
   "_version": "1.59.0",
   "sap.app": {
-    "id": "com.cfa.charlist",
+    "id": "com.cfa.vehiclelist",
     "type": "application",
     "i18n": {
       "bundleUrl": "i18n/i18n.properties",
@@ -63,7 +63,7 @@
   "sap.ui5": {
     "flexEnabled": false,
     "rootView": {
-      "viewName": "com.cfa.charlist.view.App",
+      "viewName": "com.cfa.vehiclelist.view.App",
       "type": "XML",
       "async": true,
       "id": "app"
@@ -89,7 +89,7 @@
       "i18n": {
         "type": "sap.ui.model.resource.ResourceModel",
         "settings": {
-          "bundleName": "com.cfa.charlist.i18n.i18n",
+          "bundleName": "com.cfa.vehiclelist.i18n.i18n",
           "supportedLocales": [""],
           "fallbackLocale": ""
         }
@@ -142,7 +142,7 @@
       "config": {
         "routerClass": "sap.m.routing.Router",
         "viewType": "XML",
-        "viewPath": "com.cfa.charlist.view",
+        "viewPath": "com.cfa.vehiclelist.view",
         "controlId": "app",
         "controlAggregation": "pages",
         "async": true

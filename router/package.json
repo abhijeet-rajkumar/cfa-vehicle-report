@@ -1,7 +1,7 @@
 {
-  "name": "cfa-charlist-approuter",
+  "name": "cfa-vehiclelist-approuter",
   "version": "1.0.0",
-  "description": "Standalone approuter for the CFA Technical Object Characteristics Report",
+  "description": "Standalone approuter for the CFA Vehicle Report",
   "private": true,
   "engines": {
     "node": ">=18.0.0"

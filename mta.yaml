@@ -1,7 +1,7 @@
 _schema-version: "3.3.0"
 ID: cfa-vehicle-report
 version: 1.0.0
-description: CFA Technical Object Characteristics Report - standalone approuter app
+description: CFA Vehicle Report - standalone approuter app
 
 parameters:
   enable-parallel-deployments: true
@@ -12,7 +12,7 @@ modules:
   #    deployable artifact of its own (supported-platforms: []) and
   #    is consumed by the approuter module below.
   # ----------------------------------------------------------------
-  - name: cfa-charlist-ui
+  - name: cfa-vehiclelist-ui
     type: html5
     path: .
     build-parameters:
@@ -29,15 +29,18 @@ modules:
   #    destination. The built app is copied into router/resources at
   #    build time from the module above.
   # ----------------------------------------------------------------
-  - name: cfa-charlist-approuter
+  - name: cfa-vehiclelist-approuter
     type: approuter.nodejs
     path: router
     requires:
-      - name: cfa-charlist-uaa
-      - name: cfa-charlist-dest
+      - name: cfa-vehiclelist-uaa
+      - name: cfa-vehiclelist-dest
     build-parameters:
+      # local-only config; must not override the bound destination service
+      ignore:
+        - default-env.json
       requires:
-        - name: cfa-charlist-ui
+        - name: cfa-vehiclelist-ui
           target-path: resources
           artifacts:
             - "./*"
@@ -47,7 +50,7 @@ modules:
 
 resources:
   # xsuaa instance backing the route authentication in xs-app.json
-  - name: cfa-charlist-uaa
+  - name: cfa-vehiclelist-uaa
     type: org.cloudfoundry.managed-service
     parameters:
       service: xsuaa
@@ -56,7 +59,7 @@ resources:
 
   # destination service (lite) so the approuter can read the
   # subaccount-level S4HC_Connection destination
-  - name: cfa-charlist-dest
+  - name: cfa-vehiclelist-dest
     type: org.cloudfoundry.managed-service
     parameters:
       service: destination

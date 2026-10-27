@@ -4,7 +4,7 @@ sap.ui.define([
 ], function (Controller, JSONModel) {
 	"use strict";
 
-	return Controller.extend("com.cfa.charlist.controller.App", {
+	return Controller.extend("com.cfa.vehiclelist.controller.App", {
 
 		onInit: function () {
 			// small view-scoped model so we can drive the app-level busy state if needed

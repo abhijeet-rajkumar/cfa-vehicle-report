@@ -99,7 +99,7 @@ sap.ui.define([
 			String(sDay).padStart(2, "0");
 	}
 
-	return Controller.extend("com.cfa.charlist.controller.Main", {
+	return Controller.extend("com.cfa.vehiclelist.controller.Main", {
 
 		/* =========================================================== */
 		/* lifecycle                                                   */

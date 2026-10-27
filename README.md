@@ -1,4 +1,4 @@
-# CFA Technical Object Characteristics Report
+# CFA Vehicle Report
 
 A standard (hand-rolled) **SAPUI5** application that replaces the stock *"Find Objects in Classes"* tile. The user picks a **Class Type** and a **Class**, presses **Go**, and gets a List-Report-style grid of every classified object (Equipment or Functional Location) in that class — with **one dynamically generated column per class characteristic**, populated with each object's value.
 
@@ -86,8 +86,8 @@ npm run start-local
 
 This app runs **standalone behind a standard approuter** (no FLP tile, no HTML5 Application Repository). Deployment is packaged as an **MTA** ([mta.yaml](mta.yaml)) with three pieces:
 
-1. **`cfa-charlist-ui`** — build-only module: runs `npm install` + `npm run build` and emits `dist/`. It deploys nothing on its own; its output is fed to the approuter.
-2. **`cfa-charlist-approuter`** ([router/](router/)) — the standalone approuter. At build time the UI5 `dist/` is copied into `router/resources/`, which [router/xs-app.json](router/xs-app.json) serves statically while routing `^/sap/opu/odata/sap/(.*)$` → destination **`S4HC_Connection`** (xsuaa, csrf).
+1. **`cfa-vehiclelist-ui`** — build-only module: runs `npm install` + `npm run build` and emits `dist/`. It deploys nothing on its own; its output is fed to the approuter.
+2. **`cfa-vehiclelist-approuter`** ([router/](router/)) — the standalone approuter. At build time the UI5 `dist/` is copied into `router/resources/`, which [router/xs-app.json](router/xs-app.json) serves statically while routing `^/sap/opu/odata/sap/(.*)$` → destination **`S4HC_Connection`** (xsuaa, csrf).
 3. **Services** — a managed **`xsuaa`** instance (from [xs-security.json](xs-security.json)) and a managed **`destination`** (lite) instance so the approuter can read the subaccount-level `S4HC_Connection`.
 
 ### Build & deploy
@@ -99,7 +99,7 @@ mbt build                 # -> mta_archives/cfa-vehicle-report_1.0.0.mtar
 cf deploy mta_archives/cfa-vehicle-report_1.0.0.mtar
 ```
 
-After deploy, open the `cfa-charlist-approuter` app's route.
+After deploy, open the `cfa-vehiclelist-approuter` app's route.
 
 ### Prerequisites the BTP admin must provide
 - **Destination `S4HC_Connection`** at subaccount level → S/4HANA Public Cloud tenant, auth `OAuth2ClientCredentials` (or `BasicAuthentication`) using a **Communication User** with the four communication arrangements active (Classification, Equipment, Functional Location).

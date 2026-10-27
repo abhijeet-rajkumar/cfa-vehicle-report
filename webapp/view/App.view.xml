@@ -1,5 +1,5 @@
 <mvc:View
-	controllerName="com.cfa.charlist.controller.App"
+	controllerName="com.cfa.vehiclelist.controller.App"
 	xmlns:mvc="sap.ui.core.mvc"
 	xmlns="sap.m"
 	displayBlock="true"
