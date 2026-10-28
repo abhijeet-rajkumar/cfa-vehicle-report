@@ -106,6 +106,23 @@
 								</MultiComboBox>
 							</fb:control>
 						</fb:FilterGroupItem>
+						<fb:FilterGroupItem name="vehicleAge" label="{i18n>filterVehicleAge}" groupName="main" visibleInFilterBar="true">
+							<fb:control>
+								<HBox alignItems="Center" width="100%">
+									<Input
+										id="vehicleAgeFrom"
+										type="Number"
+										placeholder="{i18n>vehicleAgeFromPlaceholder}"
+										width="4rem" />
+									<Text text="-" class="sapUiTinyMarginBegin sapUiTinyMarginEnd" />
+									<Input
+										id="vehicleAgeTo"
+										type="Number"
+										placeholder="{i18n>vehicleAgeToPlaceholder}"
+										width="4rem" />
+								</HBox>
+							</fb:control>
+						</fb:FilterGroupItem>
 					</fb:filterGroupItems>
 				</fb:FilterBar>
 			</f:DynamicPageHeader>

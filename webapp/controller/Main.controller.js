@@ -406,6 +406,12 @@ sap.ui.define([
 				return;
 			}
 
+			var oAgeRange = this._getVehicleAgeRange();
+			if (!oAgeRange.valid) {
+				this._showError(oAgeRange.error);
+				return;
+			}
+
 			this._loadResults(oCfg, aClasses);
 		},
 
@@ -1200,11 +1206,12 @@ sap.ui.define([
 		_clearFilters: function () {
 			var that = this;
 
-			["cabinConfigFilter", "equipmentOwnedByFilter", "charcSelect", "charcValueFilter"].forEach(function (sId) {
+			["cabinConfigFilter", "equipmentOwnedByFilter", "charcSelect", "charcValueFilter", "vehicleAgeFrom", "vehicleAgeTo"].forEach(function (sId) {
 				var oCtrl = that.byId(sId);
 				if (!oCtrl) { return; }
 				if (oCtrl.setSelectedKeys) { oCtrl.setSelectedKeys([]); }
 				if (oCtrl.setValue) { oCtrl.setValue(""); }
+				if (oCtrl.setValueState) { oCtrl.setValueState("None"); }
 			});
 
 		},
@@ -1219,6 +1226,12 @@ sap.ui.define([
 
 			try {
 				var aKeys = (ctx.allKeys || []).slice();
+				var oAgeRange = this._getVehicleAgeRange();
+				if (!oAgeRange.valid) {
+					this._showError(oAgeRange.error);
+					oUI.setProperty("/tableBusy", false);
+					return;
+				}
 
 				var aNamedFilters = [
 					{ controlId: "cabinConfigFilter", characteristic: "Cabin Configuration" },
@@ -1234,6 +1247,17 @@ sap.ui.define([
 						}), [sCharcId]);
 						aKeys = aKeys.filter(function (sKey) { return !!oNamedSet[sKey]; });
 					}
+				}
+
+				if (oAgeRange.active) {
+					aKeys = aKeys.filter(function (sKey) {
+						var iAgeMonths = this._vehicleAgeMonths((ctx.headers[sKey] || {}).OperationStartDate);
+						if (iAgeMonths === null) {
+							return false;
+						}
+						return (oAgeRange.from === null || iAgeMonths >= oAgeRange.from * 12) &&
+							(oAgeRange.to === null || iAgeMonths <= oAgeRange.to * 12);
+					}, this);
 				}
 
 				var aCharcIds = this._selectedKeys("charcSelect");
@@ -2478,22 +2502,73 @@ sap.ui.define([
 		},
 
 		_vehicleAge: function (vStartDate) {
-			if (!this._has(vStartDate)) {
+			var iMonths = this._vehicleAgeMonths(vStartDate);
+			if (iMonths === null) {
 				return "";
 			}
-			var dStart = new Date(this._epoch(vStartDate));
+			var iYears = Math.floor(iMonths / 12);
+			iMonths %= 12;
+			var oBundle = this._bundle();
+			return iYears + " " + oBundle.getText(iYears === 1 ? "vehicleAgeYear" : "vehicleAgeYears") +
+				" " + iMonths + " " + oBundle.getText(iMonths === 1 ? "vehicleAgeMonth" : "vehicleAgeMonths");
+		},
+
+		_vehicleAgeMonths: function (vStartDate) {
+			var sStartDate = fmtSAPDateISO(vStartDate);
+			var aDateParts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(sStartDate);
+			if (!aDateParts) {
+				return null;
+			}
+			var dStart = new Date(Date.UTC(
+				parseInt(aDateParts[1], 10),
+				parseInt(aDateParts[2], 10) - 1,
+				parseInt(aDateParts[3], 10)
+			));
+			if (dStart.getUTCFullYear() !== parseInt(aDateParts[1], 10) ||
+				dStart.getUTCMonth() !== parseInt(aDateParts[2], 10) - 1 ||
+				dStart.getUTCDate() !== parseInt(aDateParts[3], 10)) {
+				return null;
+			}
 			var dToday = new Date();
 			var iMonths = (dToday.getUTCFullYear() - dStart.getUTCFullYear()) * 12 +
 				dToday.getUTCMonth() - dStart.getUTCMonth();
 			if (dToday.getUTCDate() < dStart.getUTCDate()) {
 				iMonths--;
 			}
-			iMonths = Math.max(0, iMonths);
-			var iYears = Math.floor(iMonths / 12);
-			iMonths %= 12;
-			var oBundle = this._bundle();
-			return iYears + " " + oBundle.getText(iYears === 1 ? "vehicleAgeYear" : "vehicleAgeYears") +
-				" " + iMonths + " " + oBundle.getText(iMonths === 1 ? "vehicleAgeMonth" : "vehicleAgeMonths");
+			return Math.max(0, iMonths);
+		},
+
+		_getVehicleAgeRange: function () {
+			var oFrom = this.byId("vehicleAgeFrom");
+			var oTo = this.byId("vehicleAgeTo");
+			var sFrom = oFrom ? (oFrom.getValue() || "").trim() : "";
+			var sTo = oTo ? (oTo.getValue() || "").trim() : "";
+			var iFrom = sFrom ? Number(sFrom) : null;
+			var iTo = sTo ? Number(sTo) : null;
+			var sError = "";
+			var bInvalidFrom = sFrom !== "" && (!/^\d+$/.test(sFrom) || !isFinite(iFrom));
+			var bInvalidTo = sTo !== "" && (!/^\d+$/.test(sTo) || !isFinite(iTo));
+
+			if (bInvalidFrom || bInvalidTo) {
+				sError = this._bundle().getText("vehicleAgeRangeInvalid");
+			} else if (iFrom !== null && iTo !== null && iFrom > iTo) {
+				sError = this._bundle().getText("vehicleAgeRangeOrderInvalid");
+			}
+
+			[oFrom, oTo].forEach(function (oInput) {
+				if (oInput) {
+					oInput.setValueState(sError ? "Error" : "None");
+					oInput.setValueStateText(sError);
+				}
+			});
+
+			return {
+				valid: !sError,
+				error: sError,
+				active: sFrom !== "" || sTo !== "",
+				from: iFrom,
+				to: iTo
+			};
 		},
 
 		_buildColumns: function (aChars, oCfg) {
