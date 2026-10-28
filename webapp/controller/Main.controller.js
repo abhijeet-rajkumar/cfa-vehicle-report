@@ -1716,6 +1716,15 @@ sap.ui.define([
 			ctx.keys.sort(function (a, b) {
 				var va = (mVals[a] && mVals[a][sField]) || "";
 				var vb = (mVals[b] && mVals[b][sField]) || "";
+				if (sField === "OdometerReading") {
+					var na = parseFloat(String(va).replace(/[^\d.\-]/g, ""));
+					var nb = parseFloat(String(vb).replace(/[^\d.\-]/g, ""));
+					var bNa = isNaN(na), bNb = isNaN(nb);
+					if (bNa || bNb) {
+						return bNa === bNb ? 0 : (bNa ? 1 : -1); // blanks last
+					}
+					return bDesc ? nb - na : na - nb;
+				}
 				var c = va.localeCompare(vb, undefined, { numeric: true, sensitivity: "base" });
 				return bDesc ? -c : c;
 			});
@@ -1757,7 +1766,15 @@ sap.ui.define([
 			} else {
 				return;
 			}
-			if (!aRelevantIds.length) {
+			var mOdoCds = {};
+			if (sField === "OdometerReading") {
+				// the column displays the fleet CDS reading, so sort on that
+				if (!ctx.odometerAll) {
+					ctx.odometerAll = await this._fetchOdometerReadings(ctx.keys || []);
+				}
+				mOdoCds = ctx.odometerAll;
+			}
+			if (!aRelevantIds.length && sField !== "OdometerReading") {
 				return;
 			}
 			var mValues = ctx.reportCharValues || (ctx.reportCharValues = {});
@@ -1805,7 +1822,9 @@ sap.ui.define([
 				var oSort = ctx.sortVals[sKey] || (ctx.sortVals[sKey] = {});
 				oSort.CabinConfiguration = valueFor(sCabinId);
 				oSort.EquipmentOwnedBy = valueFor(sOwnerId);
-				oSort.OdometerReading = valueFor(sOdometerId);
+				if (sField === "OdometerReading" || !oSort.OdometerReading) {
+					oSort.OdometerReading = mOdoCds[sKey] || valueFor(sOdometerId);
+				}
 				oSort.SubClassValue = aRelevantIds.map(function (sCharcId) {
 					return valueFor(sCharcId);
 				}).filter(Boolean).join(", ");
