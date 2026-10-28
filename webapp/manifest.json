@@ -41,6 +41,13 @@
         "settings": {
           "odataVersion": "2.0"
         }
+      },
+      "FleetOdometer": {
+        "uri": "/sap/opu/odata/sap/YY1_FLEET_ODOMETER_CDS/",
+        "type": "OData",
+        "settings": {
+          "odataVersion": "2.0"
+        }
       }
     }
   },
@@ -123,6 +130,15 @@
       },
       "funcloc": {
         "dataSource": "FunctionalLocation",
+        "preload": false,
+        "settings": {
+          "defaultBindingMode": "OneWay",
+          "useBatch": false,
+          "defaultCountMode": "None"
+        }
+      },
+      "odometer": {
+        "dataSource": "FleetOdometer",
         "preload": false,
         "settings": {
           "defaultBindingMode": "OneWay",

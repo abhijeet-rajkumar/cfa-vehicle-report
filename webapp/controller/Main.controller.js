@@ -1899,6 +1899,9 @@ sap.ui.define([
 				var oContext = { className: ctx.className, classId: ctx.sClassId, classByKey: ctx.classByKey };
 				var aRows = this._pivotData(aValues, ctx.aChars, ctx.mMeta, ctx.oCfg, oContext, mHeaders, aKeys);
 
+				// 5. odometer readings from the fleet odometer CDS view
+				ctx.odometer = await this._fetchOdometerReadings(aKeys);
+
 				oUI.setProperty("/rows", aRows);
 				oUI.setProperty("/treeRows", this._buildTreeRows(aRows, ctx.aChars));
 				oUI.setProperty("/showNoData", false);
@@ -1912,6 +1915,74 @@ sap.ui.define([
 			} finally {
 				oUI.setProperty("/tableBusy", false);
 			}
+		},
+
+		/**
+		 * Load odometer readings for the given equipment keys from
+		 * YY1_FLEET_ODOMETER (latest reading per equipment). Failures are
+		 * non-fatal: the column then falls back to the characteristic value.
+		 * @param {string[]} aKeys equipment numbers
+		 * @returns {Promise<object>} map equipment -> formatted reading
+		 */
+		_fetchOdometerReadings: async function (aKeys) {
+			var mOut = {};
+			var oModel = this._model("odometer");
+			if (!oModel || !aKeys.length) {
+				return mOut;
+			}
+			var mLatest = {};
+			try {
+				var aChunks = this._chunk(aKeys, 20);
+				for (var i = 0; i < aChunks.length; i++) {
+					var sFilter = aChunks[i].map(function (sKey) {
+						return "Equipment eq '" + this._esc(sKey) + "'";
+					}, this).join(" or ");
+					var aRows = await this._read(oModel, "/YY1_FLEET_ODOMETER", {
+						"$filter": sFilter,
+						"$top": MAX_LIST_ROWS
+					});
+					aRows.forEach(function (oRow) {
+						var sEquipment = oRow.Equipment;
+						var sReading = this._pickOdometerValue(oRow);
+						if (!sEquipment || sReading === "") {
+							return;
+						}
+						var sStamp = this._pickOdometerStamp(oRow);
+						var oPrev = mLatest[sEquipment];
+						if (!oPrev || sStamp >= oPrev.stamp) {
+							mLatest[sEquipment] = { stamp: sStamp, value: sReading };
+						}
+					}, this);
+				}
+			} catch (oError) {
+				return {};
+			}
+			Object.keys(mLatest).forEach(function (sKey) {
+				mOut[sKey] = mLatest[sKey].value;
+			});
+			return mOut;
+		},
+
+		/** Reading field of a fleet odometer row (first property named like odometer/reading/mileage). */
+		_pickOdometerValue: function (oRow) {
+			var aKeys = Object.keys(oRow).filter(function (k) {
+				return k !== "__metadata" && /odometer|reading|mileage|counter/i.test(k) && !/unit|date|time|uom/i.test(k);
+			});
+			if (!aKeys.length) {
+				return "";
+			}
+			var v = oRow[aKeys[0]];
+			return (v === null || v === undefined || v === "") ? "" : this._numStr(v);
+		},
+
+		/** Sortable recency stamp of a fleet odometer row (date/time fields concatenated). */
+		_pickOdometerStamp: function (oRow) {
+			return Object.keys(oRow).filter(function (k) {
+				return /date|time/i.test(k) && k !== "__metadata";
+			}).sort().map(function (k) {
+				var v = oRow[k];
+				return v instanceof Date ? v.toISOString() : String(v == null ? "" : v);
+			}).join("|");
 		},
 
 		/** Update pagination state + labels for the given page. */
@@ -2350,6 +2421,7 @@ sap.ui.define([
 			var aSelectedCharcIds = this._selectedKeys("charcSelect");
 			var aSelectedValues = this._selectedKeys("charcValueFilter");
 			var sOdometerId = this._findCharacteristicId(aChars, "Odometer Reading");
+			var mOdometer = (this._pageCtx && this._pageCtx.odometer) || {};
 
 			return aRows.map(function (oRow) {
 				var oHeader = mHeaders[oRow.objNumber] || {};
@@ -2360,7 +2432,7 @@ sap.ui.define([
 					Class: oRow.objClass || "",
 					CabinConfiguration: oRow.cabinConfig,
 					EquipmentOwnedBy: oRow.ownedBy,
-					OdometerReading: sOdometerId ? (oRow["C_" + sOdometerId] || "") : "",
+					OdometerReading: mOdometer[oRow.objNumber] || (sOdometerId ? (oRow["C_" + sOdometerId] || "") : ""),
 					StartUpDate: fmtSAPDateISO(oRow.OperationStartDate),
 					ManufacturerSerialNumber: oRow.ManufacturerSerialNumber || "",
 					TechnicalID: oHeader.TechnicalObjectSortCode || "",
