@@ -113,13 +113,38 @@
 										id="vehicleAgeFrom"
 										type="Number"
 										placeholder="{i18n>vehicleAgeFromPlaceholder}"
-										width="4rem" />
+										width="100%">
+						<layoutData><FlexItemData growFactor="1" baseSize="0" /></layoutData>
+					</Input>
 									<Text text="-" class="sapUiTinyMarginBegin sapUiTinyMarginEnd" />
 									<Input
 										id="vehicleAgeTo"
 										type="Number"
 										placeholder="{i18n>vehicleAgeToPlaceholder}"
-										width="4rem" />
+										width="100%">
+						<layoutData><FlexItemData growFactor="1" baseSize="0" /></layoutData>
+					</Input>
+								</HBox>
+							</fb:control>
+						</fb:FilterGroupItem>
+						<fb:FilterGroupItem name="odometer" label="{i18n>filterOdometerKms}" groupName="main" visibleInFilterBar="true">
+							<fb:control>
+								<HBox alignItems="Center" width="100%">
+									<Input
+										id="odometerFrom"
+										type="Number"
+										placeholder="{i18n>vehicleAgeFromPlaceholder}"
+										width="100%">
+						<layoutData><FlexItemData growFactor="1" baseSize="0" /></layoutData>
+					</Input>
+									<Text text="-" class="sapUiTinyMarginBegin sapUiTinyMarginEnd" />
+									<Input
+										id="odometerTo"
+										type="Number"
+										placeholder="{i18n>vehicleAgeToPlaceholder}"
+										width="100%">
+						<layoutData><FlexItemData growFactor="1" baseSize="0" /></layoutData>
+					</Input>
 								</HBox>
 							</fb:control>
 						</fb:FilterGroupItem>

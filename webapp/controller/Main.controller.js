@@ -412,6 +412,11 @@ sap.ui.define([
 				this._showError(oAgeRange.error);
 				return;
 			}
+			var oOdoRange = this._getOdometerRange();
+			if (!oOdoRange.valid) {
+				this._showError(oOdoRange.error);
+				return;
+			}
 
 			this._loadResults(oCfg, aClasses);
 		},
@@ -1219,7 +1224,7 @@ sap.ui.define([
 		_clearFilters: function () {
 			var that = this;
 
-			["cabinConfigFilter", "equipmentOwnedByFilter", "charcSelect", "charcValueFilter", "vehicleAgeFrom", "vehicleAgeTo"].forEach(function (sId) {
+			["cabinConfigFilter", "equipmentOwnedByFilter", "charcSelect", "charcValueFilter", "vehicleAgeFrom", "vehicleAgeTo", "odometerFrom", "odometerTo"].forEach(function (sId) {
 				var oCtrl = that.byId(sId);
 				if (!oCtrl) { return; }
 				if (oCtrl.setSelectedKeys) { oCtrl.setSelectedKeys([]); }
@@ -1242,6 +1247,12 @@ sap.ui.define([
 				var oAgeRange = this._getVehicleAgeRange();
 				if (!oAgeRange.valid) {
 					this._showError(oAgeRange.error);
+					oUI.setProperty("/tableBusy", false);
+					return;
+				}
+				var oOdoRange = this._getOdometerRange();
+				if (!oOdoRange.valid) {
+					this._showError(oOdoRange.error);
 					oUI.setProperty("/tableBusy", false);
 					return;
 				}
@@ -1271,6 +1282,21 @@ sap.ui.define([
 						return (oAgeRange.from === null || iAgeMonths >= oAgeRange.from * 12) &&
 							(oAgeRange.to === null || iAgeMonths <= oAgeRange.to * 12);
 					}, this);
+				}
+
+				if (oOdoRange.active) {
+					if (!ctx.odometerAll) {
+						ctx.odometerAll = await this._fetchOdometerReadings(ctx.allKeys || []);
+					}
+					var mOdo = ctx.odometerAll;
+					aKeys = aKeys.filter(function (sKey) {
+						var fOdo = parseFloat(mOdo[sKey]);
+						if (isNaN(fOdo)) {
+							return false;
+						}
+						return (oOdoRange.from === null || fOdo >= oOdoRange.from) &&
+							(oOdoRange.to === null || fOdo <= oOdoRange.to);
+					});
 				}
 
 				var aCharcIds = this._selectedKeys("charcSelect");
@@ -2577,8 +2603,16 @@ sap.ui.define([
 		},
 
 		_getVehicleAgeRange: function () {
-			var oFrom = this.byId("vehicleAgeFrom");
-			var oTo = this.byId("vehicleAgeTo");
+			return this._getRange("vehicleAgeFrom", "vehicleAgeTo", "vehicleAgeRangeInvalid", "vehicleAgeRangeOrderInvalid");
+		},
+
+		_getOdometerRange: function () {
+			return this._getRange("odometerFrom", "odometerTo", "odometerRangeInvalid", "odometerRangeOrderInvalid");
+		},
+
+		_getRange: function (sFromId, sToId, sInvalidKey, sOrderKey) {
+			var oFrom = this.byId(sFromId);
+			var oTo = this.byId(sToId);
 			var sFrom = oFrom ? (oFrom.getValue() || "").trim() : "";
 			var sTo = oTo ? (oTo.getValue() || "").trim() : "";
 			var iFrom = sFrom ? Number(sFrom) : null;
@@ -2588,9 +2622,9 @@ sap.ui.define([
 			var bInvalidTo = sTo !== "" && (!/^\d+$/.test(sTo) || !isFinite(iTo));
 
 			if (bInvalidFrom || bInvalidTo) {
-				sError = this._bundle().getText("vehicleAgeRangeInvalid");
+				sError = this._bundle().getText(sInvalidKey);
 			} else if (iFrom !== null && iTo !== null && iFrom > iTo) {
-				sError = this._bundle().getText("vehicleAgeRangeOrderInvalid");
+				sError = this._bundle().getText(sOrderKey);
 			}
 
 			[oFrom, oTo].forEach(function (oInput) {
