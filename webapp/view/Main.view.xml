@@ -177,6 +177,7 @@
 							<core:Item key="100" text="100" />
 						</Select>
 						<ToolbarSpacer />
+						<Button id="expandAllBtn" text="{= ${ui>/treeExpandedAll} ? ${i18n>collapseAllButton} : ${i18n>expandAllButton} }" press="onExpandAll" />
 						<Switch id="showEmptySwitch" state="{ui>/showEmpty}" change="onShowEmptyChange" />
 						<Label text="{i18n>showEmpty}" />
 						<Button id="exportBtn" icon="sap-icon://excel-attachment" text="{i18n>exportButton}" tooltip="{i18n>exportButton}" press="onExport" />

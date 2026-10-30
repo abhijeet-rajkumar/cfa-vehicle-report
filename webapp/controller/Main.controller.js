@@ -133,6 +133,7 @@ sap.ui.define([
 
 				// hierarchical result rows for the tree table
 				showEmpty: false,
+				treeExpandedAll: false,
 				treeRows: [],
 
 				// characteristic filter options (populated when a class is selected)
@@ -886,6 +887,18 @@ sap.ui.define([
 			}
 			var aRows = this._ui().getProperty("/rows") || [];
 			this._ui().setProperty("/treeRows", this._buildTreeRows(aRows, this._pageCtx.aChars));
+		},
+
+		onExpandAll: function () {
+			var oUI = this._ui();
+			var oTable = this.byId("equipmentTreeTable");
+			if (oUI.getProperty("/treeExpandedAll")) {
+				oTable.collapseAll();
+				oUI.setProperty("/treeExpandedAll", false);
+			} else {
+				oTable.expandToLevel(1);
+				oUI.setProperty("/treeExpandedAll", true);
+			}
 		},
 
 		onPrevPage: function () {
