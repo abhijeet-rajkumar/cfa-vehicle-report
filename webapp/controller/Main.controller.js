@@ -2467,6 +2467,7 @@ sap.ui.define([
 
 		/**
 		 * Build equipment rows with characteristic name/value children for the report.
+		 * A single characteristic is displayed on its parent row instead.
 		 * @param {object[]} aRows pivoted rows
 		 * @param {object[]} aChars ordered characteristics
 		 * @returns {object[]} tree-table rows
@@ -2528,7 +2529,12 @@ sap.ui.define([
 						return bDesc ? -iOrder : iOrder;
 					});
 				}
-				oOut.children = aChildren;
+				if (aChildren.length === 1) {
+					oOut.SubClassName = aChildren[0].SubClassName;
+					oOut.SubClassValue = aChildren[0].SubClassValue;
+				} else {
+					oOut.children = aChildren;
+				}
 				return oOut;
 			}, this);
 		},
