@@ -25,18 +25,24 @@
 		<!-- Filter bar lives in the page header -->
 		<f:header>
 			<f:DynamicPageHeader pinnable="true">
-				<fb:FilterBar
-					id="filterbar"
-					useToolbar="false"
-					showFilterConfiguration="false"
-					showRestoreButton="false"
-					showClearButton="true"
-					showGoOnFB="true"
-					showClearOnFB="true"
-					search="onGoPress"
-					clear="onClearPress">
+				<Panel
+					id="filterSection"
+					headerText="{i18n>filterSectionTitle}"
+					expandable="true"
+					expanded="true"
+					width="100%">
+					<fb:FilterBar
+						id="filterbar"
+						useToolbar="false"
+						showFilterConfiguration="false"
+						showRestoreButton="false"
+						showClearButton="true"
+						showGoOnFB="true"
+						showClearOnFB="true"
+						search="onGoPress"
+						clear="onClearPress">
 					<fb:filterGroupItems>
-						<fb:FilterGroupItem name="class" label="{i18n>filterClass}" groupName="main" visibleInFilterBar="true">
+						<fb:FilterGroupItem name="class" label="{i18n>filterClass}" groupName="main" visibleInFilterBar="true" mandatory="true">
 							<fb:control>
 								<Select
 									id="classSelect"
@@ -149,7 +155,8 @@
 							</fb:control>
 						</fb:FilterGroupItem>
 					</fb:filterGroupItems>
-				</fb:FilterBar>
+					</fb:FilterBar>
+				</Panel>
 			</f:DynamicPageHeader>
 		</f:header>
 

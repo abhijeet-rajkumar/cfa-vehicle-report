@@ -2513,6 +2513,11 @@ sap.ui.define([
 			var bShowEmpty = !!this._ui().getProperty("/showEmpty");
 			var aSelectedCharcIds = this._selectedKeys("charcSelect");
 			var aSelectedValues = this._selectedKeys("charcValueFilter");
+			var bCabinFilterSelected = this._selectedKeys("cabinConfigFilter").length > 0;
+			var bAgeFilterSelected = this._hasRangeValue("vehicleAgeFrom", "vehicleAgeTo");
+			var bOdometerFilterSelected = this._hasRangeValue("odometerFrom", "odometerTo");
+			var bShowOnlyParent = (bCabinFilterSelected || bAgeFilterSelected || bOdometerFilterSelected) &&
+				!aSelectedCharcIds.length;
 			var sOdometerId = this._findCharacteristicId(aChars, "Odometer Reading");
 			var mOdometer = (this._pageCtx && this._pageCtx.odometer) || {};
 
@@ -2531,6 +2536,11 @@ sap.ui.define([
 					TechnicalID: oHeader.TechnicalObjectSortCode || "",
 					children: []
 				};
+				if (bShowOnlyParent) {
+					oOut.SubClassName = "";
+					oOut.SubClassValue = "";
+					return oOut;
+				}
 				var aChildren = [];
 				aChars.forEach(function (oChar) {
 					if (aSelectedCharcIds.length && aSelectedCharcIds.indexOf(oChar.CharcInternalID) === -1) {
@@ -2618,6 +2628,13 @@ sap.ui.define([
 
 		_getOdometerRange: function () {
 			return this._getRange("odometerFrom", "odometerTo", "odometerRangeInvalid", "odometerRangeOrderInvalid");
+		},
+
+		_hasRangeValue: function (sFromId, sToId) {
+			return [sFromId, sToId].some(function (sId) {
+				var oInput = this.byId(sId);
+				return oInput && (oInput.getValue() || "").trim() !== "";
+			}, this);
 		},
 
 		_getRange: function (sFromId, sToId, sInvalidKey, sOrderKey) {
