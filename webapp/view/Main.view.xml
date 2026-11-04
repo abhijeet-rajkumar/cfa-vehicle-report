@@ -208,14 +208,6 @@
 						<Button id="exportBtn" icon="sap-icon://excel-attachment" text="{i18n>exportButton}" tooltip="{i18n>exportButton}" press="onExport" />
 					</OverflowToolbar>
 
-				<ScrollContainer horizontal="true" vertical="false" width="100%" class="sapUiTinyMarginBottom">
-					<FlexBox alignItems="Center" wrap="NoWrap">
-						<Label text="{i18n>sortBy}" class="sapUiTinyMarginEnd" />
-						<HBox wrap="NoWrap" items="{ path: 'ui>/sortFields', templateShareable: false }">
-							<Button text="{ui>label}" press="onSortFieldPress" type="{= ${ui>key} === ${ui>/sortField} ? 'Emphasized' : 'Transparent' }" icon="{= ${ui>key} === ${ui>/sortField} ? (${ui>/sortDesc} ? 'sap-icon://sort-descending' : 'sap-icon://sort-ascending') : 'sap-icon://sort' }" class="sapUiTinyMarginEnd cfaSortBtn" />
-						</HBox>
-					</FlexBox>
-				</ScrollContainer>
 				<table:TreeTable
 					id="equipmentTreeTable"
 					visible="{ui>/showTable}"
@@ -230,61 +222,111 @@
 					busyIndicatorDelay="0">
 					<table:columns>
 						<table:Column width="12rem">
-							<Label text="{i18n>colTechnicalObject}" />
+							<HBox alignItems="Center" width="100%">
+								<Label text="{i18n>colTechnicalObject}" />
+								<Button press="onSortFieldPress" type="{= ${ui>/sortField} === 'TechnicalObject' ? 'Emphasized' : 'Transparent' }" icon="{= ${ui>/sortField} === 'TechnicalObject' ? (${ui>/sortDesc} ? 'sap-icon://sort-descending' : 'sap-icon://sort-ascending') : 'sap-icon://sort' }" tooltip="{i18n>colTechnicalObject}" class="cfaColumnSortBtn">
+									<customData><core:CustomData key="sortKey" value="TechnicalObject" /></customData>
+								</Button>
+							</HBox>
 							<table:template>
 								<Text text="{ui>TechnicalObject}" />
 							</table:template>
 						</table:Column>
 						<table:Column width="22rem">
-							<Label text="{i18n>colTechnicalObjectDescription}" />
+							<HBox alignItems="Center" width="100%">
+								<Label text="{i18n>colTechnicalObjectDescription}" />
+								<Button press="onSortFieldPress" type="{= ${ui>/sortField} === 'TechnicalObjectDescription' ? 'Emphasized' : 'Transparent' }" icon="{= ${ui>/sortField} === 'TechnicalObjectDescription' ? (${ui>/sortDesc} ? 'sap-icon://sort-descending' : 'sap-icon://sort-ascending') : 'sap-icon://sort' }" tooltip="{i18n>colTechnicalObjectDescription}" class="cfaColumnSortBtn">
+									<customData><core:CustomData key="sortKey" value="TechnicalObjectDescription" /></customData>
+								</Button>
+							</HBox>
 							<table:template>
 								<Text text="{ui>TechnicalObjectDescription}" />
 							</table:template>
 						</table:Column>
 						<table:Column width="9rem">
-							<Label text="{i18n>colVehicleAge}" />
+							<HBox alignItems="Center" width="100%">
+								<Label text="{i18n>colVehicleAge}" />
+								<Button press="onSortFieldPress" type="{= ${ui>/sortField} === 'VehicleAge' ? 'Emphasized' : 'Transparent' }" icon="{= ${ui>/sortField} === 'VehicleAge' ? (${ui>/sortDesc} ? 'sap-icon://sort-descending' : 'sap-icon://sort-ascending') : 'sap-icon://sort' }" tooltip="{i18n>colVehicleAge}" class="cfaColumnSortBtn">
+									<customData><core:CustomData key="sortKey" value="VehicleAge" /></customData>
+								</Button>
+							</HBox>
 							<table:template>
 								<Text text="{ui>VehicleAge}" />
 							</table:template>
 						</table:Column>
 						<table:Column width="12rem">
-							<Label text="{i18n>colClass}" />
+							<HBox alignItems="Center" width="100%">
+								<Label text="{i18n>colClass}" />
+								<Button press="onSortFieldPress" type="{= ${ui>/sortField} === 'Class' ? 'Emphasized' : 'Transparent' }" icon="{= ${ui>/sortField} === 'Class' ? (${ui>/sortDesc} ? 'sap-icon://sort-descending' : 'sap-icon://sort-ascending') : 'sap-icon://sort' }" tooltip="{i18n>colClass}" class="cfaColumnSortBtn">
+									<customData><core:CustomData key="sortKey" value="Class" /></customData>
+								</Button>
+							</HBox>
 							<table:template>
 								<Text text="{ui>Class}" />
 							</table:template>
 						</table:Column>
 						<table:Column width="18rem">
-							<Label text="{i18n>colSubClassName}" />
+							<HBox alignItems="Center" width="100%">
+								<Label text="{i18n>colSubClassName}" />
+								<Button press="onSortFieldPress" type="{= ${ui>/sortField} === 'SubClassName' ? 'Emphasized' : 'Transparent' }" icon="{= ${ui>/sortField} === 'SubClassName' ? (${ui>/sortDesc} ? 'sap-icon://sort-descending' : 'sap-icon://sort-ascending') : 'sap-icon://sort' }" tooltip="{i18n>colSubClassName}" class="cfaColumnSortBtn">
+									<customData><core:CustomData key="sortKey" value="SubClassName" /></customData>
+								</Button>
+							</HBox>
 							<table:template>
 								<Text text="{ui>SubClassName}" />
 							</table:template>
 						</table:Column>
 						<table:Column width="18rem">
-							<Label text="{i18n>colSubClassValue}" />
+							<HBox alignItems="Center" width="100%">
+								<Label text="{i18n>colSubClassValue}" />
+								<Button press="onSortFieldPress" type="{= ${ui>/sortField} === 'SubClassValue' ? 'Emphasized' : 'Transparent' }" icon="{= ${ui>/sortField} === 'SubClassValue' ? (${ui>/sortDesc} ? 'sap-icon://sort-descending' : 'sap-icon://sort-ascending') : 'sap-icon://sort' }" tooltip="{i18n>colSubClassValue}" class="cfaColumnSortBtn">
+									<customData><core:CustomData key="sortKey" value="SubClassValue" /></customData>
+								</Button>
+							</HBox>
 							<table:template>
 								<Text text="{ui>SubClassValue}" />
 							</table:template>
 						</table:Column>
 						<table:Column width="17rem">
-							<Label text="{i18n>filterCabinConfig}" />
+							<HBox alignItems="Center" width="100%">
+								<Label text="{i18n>filterCabinConfig}" />
+								<Button press="onSortFieldPress" type="{= ${ui>/sortField} === 'CabinConfiguration' ? 'Emphasized' : 'Transparent' }" icon="{= ${ui>/sortField} === 'CabinConfiguration' ? (${ui>/sortDesc} ? 'sap-icon://sort-descending' : 'sap-icon://sort-ascending') : 'sap-icon://sort' }" tooltip="{i18n>filterCabinConfig}" class="cfaColumnSortBtn">
+									<customData><core:CustomData key="sortKey" value="CabinConfiguration" /></customData>
+								</Button>
+							</HBox>
 							<table:template>
 								<Text text="{ui>CabinConfiguration}" />
 							</table:template>
 						</table:Column>
 						<table:Column width="17rem">
-							<Label text="{i18n>filterOwnedBy}" />
+							<HBox alignItems="Center" width="100%">
+								<Label text="{i18n>filterOwnedBy}" />
+								<Button press="onSortFieldPress" type="{= ${ui>/sortField} === 'EquipmentOwnedBy' ? 'Emphasized' : 'Transparent' }" icon="{= ${ui>/sortField} === 'EquipmentOwnedBy' ? (${ui>/sortDesc} ? 'sap-icon://sort-descending' : 'sap-icon://sort-ascending') : 'sap-icon://sort' }" tooltip="{i18n>filterOwnedBy}" class="cfaColumnSortBtn">
+									<customData><core:CustomData key="sortKey" value="EquipmentOwnedBy" /></customData>
+								</Button>
+							</HBox>
 							<table:template>
 								<Text text="{ui>EquipmentOwnedBy}" />
 							</table:template>
 						</table:Column>
 						<table:Column width="16rem">
-							<Label text="{i18n>filterOdometer}" />
+							<HBox alignItems="Center" width="100%">
+								<Label text="{i18n>filterOdometer}" />
+								<Button press="onSortFieldPress" type="{= ${ui>/sortField} === 'OdometerReading' ? 'Emphasized' : 'Transparent' }" icon="{= ${ui>/sortField} === 'OdometerReading' ? (${ui>/sortDesc} ? 'sap-icon://sort-descending' : 'sap-icon://sort-ascending') : 'sap-icon://sort' }" tooltip="{i18n>filterOdometer}" class="cfaColumnSortBtn">
+									<customData><core:CustomData key="sortKey" value="OdometerReading" /></customData>
+								</Button>
+							</HBox>
 							<table:template>
 								<Text text="{ui>OdometerReading}" />
 							</table:template>
 						</table:Column>
 						<table:Column width="20rem">
-							<Label text="{i18n>colStartUpGeneralData}" />
+							<HBox alignItems="Center" width="100%">
+								<Label text="{i18n>colStartUpGeneralData}" />
+								<Button press="onSortFieldPress" type="{= ${ui>/sortField} === 'StartUpDate' ? 'Emphasized' : 'Transparent' }" icon="{= ${ui>/sortField} === 'StartUpDate' ? (${ui>/sortDesc} ? 'sap-icon://sort-descending' : 'sap-icon://sort-ascending') : 'sap-icon://sort' }" tooltip="{i18n>colStartUpGeneralData}" class="cfaColumnSortBtn">
+									<customData><core:CustomData key="sortKey" value="StartUpDate" /></customData>
+								</Button>
+							</HBox>
 							<table:template>
 								<Text text="{ui>StartUpDate}" />
 							</table:template>

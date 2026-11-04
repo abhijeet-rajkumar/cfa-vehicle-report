@@ -37,8 +37,8 @@
 	margin-bottom: 0.25rem;
 }
 
-/* sort buttons stay on one row with unwrapped text; the row scrolls if too wide */
-.cfaSortBtn {
+/* Keep sort icons compact beside their column labels. */
+.cfaColumnSortBtn {
 	flex: 0 0 auto;
-	white-space: nowrap;
+	margin-left: 0.25rem;
 }

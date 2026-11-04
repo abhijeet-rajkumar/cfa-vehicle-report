@@ -1876,9 +1876,9 @@ sap.ui.define([
 			if (!ctx) {
 				return;
 			}
-			var oItem = oEvent.getSource().getBindingContext("ui").getObject();
-			var bDesc = (ctx.sortField === oItem.key) ? !ctx.sortDesc : false;
-			this._setSort(oItem.key, bDesc);
+			var sField = oEvent.getSource().data("sortKey");
+			var bDesc = (ctx.sortField === sField) ? !ctx.sortDesc : false;
+			this._setSort(sField, bDesc);
 		},
 
 		/** Open the sort dialog for the visible report columns. */
@@ -2662,7 +2662,7 @@ sap.ui.define([
 
 			this._ui().setProperty("/columnConfig", aColumnConfig);
 
-			// sortable fields used by the result toolbar
+			// sortable fields exposed by the table column headers
 			this._ui().setProperty("/sortFields", [
 				{ key: "TechnicalObject", label: this._bundle().getText("colTechnicalObject") },
 				{ key: "TechnicalObjectDescription", label: this._bundle().getText("colTechnicalObjectDescription") },
