@@ -940,8 +940,18 @@ sap.ui.define([
 				var oTemplate = oColumn.getTemplate();
 				var oBinding = oTemplate && oTemplate.getBindingInfo("text");
 				var oLabel = oColumn.getLabel();
+				if (Array.isArray(oLabel)) {
+					oLabel = oLabel[0];
+				}
+				// header may be a Label or a container (HBox) holding a Label
+				if (oLabel && typeof oLabel.getText !== "function" && typeof oLabel.findAggregatedObjects === "function") {
+					oLabel = oLabel.findAggregatedObjects(true, function (o) {
+						return typeof o.getText === "function";
+					})[0];
+				}
+				var sLabel = oLabel && typeof oLabel.getText === "function" ? oLabel.getText() : (typeof oLabel === "string" ? oLabel : "");
 				return {
-					label: oLabel.getText(),
+					label: sLabel,
 					property: oBinding.parts[0].path
 				};
 			});
