@@ -1,12 +1,24 @@
-/*
- * Project-specific styles.
- * v1 uses the default sap_horizon theme with no custom branding — this file is
- * intentionally an (almost) empty placeholder for future layout tweaks.
- */
+/* Project-specific styles for the default sap_horizon theme. */
 
 /* Keep dynamic-column cells on a single line so wide tables stay readable. */
 .sapUiTableCell .sapMText {
 	white-space: nowrap;
+}
+
+.cfaTopTableScrollbar {
+	width: 100%;
+	direction: ltr;
+}
+
+.cfaTopTableScrollbarScroll {
+	display: none;
+	overflow-x: auto;
+	overflow-y: hidden;
+	height: 1rem;
+}
+
+.cfaTopTableScrollbarScroll > div {
+	height: 1px;
 }
 
 /* ===== List / card view ===== */
