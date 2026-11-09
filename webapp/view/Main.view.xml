@@ -9,7 +9,7 @@
 	xmlns:custom="com.cfa.vehiclelist.control"
 	height="100%">
 
-	<f:DynamicPage id="page" headerExpanded="true" toggleHeaderOnTitleClick="false" fitContent="true">
+	<f:DynamicPage id="page" headerExpanded="true" toggleHeaderOnTitleClick="false">
 
 		<!-- Title -->
 		<f:title>
@@ -199,16 +199,12 @@
 					visible="{ui>/showTable}"
 					expandable="true"
 					expanded="false"
+					expand="onTableScroll"
+					height="100%"
 					width="100%">
 					<OverflowToolbar>
-						<Button id="prevPage" icon="sap-icon://navigation-left-arrow" tooltip="{i18n>prevPageButton}" enabled="{ui>/pagePrevEnabled}" press="onPrevPage" />
 						<Text id="pageInfo" text="{ui>/pageInfo}" />
-						<Button id="nextPage" icon="sap-icon://navigation-right-arrow" tooltip="{i18n>nextPageButton}" enabled="{ui>/pageNextEnabled}" press="onNextPage" />
-						<Select id="pageSizeSelect" selectedKey="{ui>/pageSize}" forceSelection="true" autoAdjustWidth="true" tooltip="{i18n>rowsPerPage}" change="onPageSizeChange">
-							<core:Item key="25" text="25" />
-							<core:Item key="50" text="50" />
-							<core:Item key="100" text="100" />
-						</Select>
+						<Button id="retryLoadMore" text="{i18n>retryLoadMore}" visible="{ui>/loadMoreFailed}" press="onRetryLoadMore" />
 						<ToolbarSpacer />
 						<Button id="expandAllBtn" text="{= ${ui>/treeExpandedAll} ? ${i18n>collapseAllButton} : ${i18n>expandAllButton} }" press="onExpandAll" />
 						<Switch id="showEmptySwitch" state="{ui>/showEmpty}" change="onShowEmptyChange" />
@@ -226,6 +222,11 @@
 					enableColumnReordering="true"
 					alternateRowColors="true"
 					expandFirstLevel="true"
+					firstVisibleRowChanged="onTableScroll"
+					rowsUpdated="onTableScroll"
+					visibleRowCountMode="Auto"
+					minAutoRowCount="10"
+					height="100%"
 					width="100%"
 					busy="{ui>/tableBusy}"
 					busyIndicatorDelay="0">

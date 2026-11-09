@@ -128,8 +128,8 @@ sap.ui.define([
 				// server paging
 				pageSize: 25,
 				pageInfo: "",
-				pagePrevEnabled: false,
 				pageNextEnabled: false,
+				loadMoreFailed: false,
 
 				// hierarchical result rows for the tree table
 				showEmpty: false,
@@ -633,6 +633,7 @@ sap.ui.define([
 		 * @param {string} sNum the object number
 		 */
 		_searchObject: async function (sNum) {
+			this._pageLoadToken = (this._pageLoadToken || 0) + 1;
 			var oUI = this._ui();
 			var sType = "002";
 			var oCfg = this._typeConfig(sType);
@@ -687,6 +688,7 @@ sap.ui.define([
 
 		/** Load a single object's row for a resolved class. */
 		_loadSingleObject: async function (oCfg, sNum, oClass) {
+			this._pageLoadToken = (this._pageLoadToken || 0) + 1;
 			var oUI = this._ui();
 			oUI.setProperty("/showEmptyState", false);
 			oUI.setProperty("/showNoData", false);
@@ -737,6 +739,7 @@ sap.ui.define([
 		 * @param {string[]} aNums object numbers
 		 */
 		_searchObjects: async function (aNums) {
+			this._pageLoadToken = (this._pageLoadToken || 0) + 1;
 			var oUI = this._ui();
 			var that = this;
 			var sType = "002";
@@ -906,21 +909,26 @@ sap.ui.define([
 			}
 		},
 
-		onPrevPage: function () {
-			if (this._currentPage > 0) {
-				this._loadPage(this._currentPage - 1);
+		onTableScroll: function () {
+			var oUI = this._ui();
+			var oTable = this.byId("equipmentTreeTable");
+			var oPanel = this.byId("equipmentReportPanel");
+			var oBinding = oTable && oTable.getBinding("rows");
+			if (!oBinding || !oPanel.getExpanded() || !oUI.getProperty("/showTable") ||
+				oUI.getProperty("/tableBusy") || oUI.getProperty("/loadMoreFailed") ||
+				!oUI.getProperty("/pageNextEnabled")) {
+				return;
+			}
+			if (oTable.getFirstVisibleRow() + oTable.getVisibleRowCount() >= oBinding.getLength()) {
+				this._loadPage(this._currentPage + 1);
 			}
 		},
 
-		onNextPage: function () {
-			this._loadPage((this._currentPage || 0) + 1);
-		},
-
-		onPageSizeChange: function (oEvent) {
-			var iSize = parseInt(oEvent.getParameter("selectedItem").getKey(), 10) || 25;
-			this._ui().setProperty("/pageSize", iSize);
-			// jump back to the first page at the new size
-			this._loadPage(0);
+		onRetryLoadMore: function () {
+			if (!this._ui().getProperty("/tableBusy") && this._ui().getProperty("/pageNextEnabled")) {
+				this._hideError();
+				this._loadPage(this._currentPage + 1);
+			}
 		},
 
 		/**
@@ -1084,6 +1092,7 @@ sap.ui.define([
 		/* =========================================================== */
 
 		_loadResults: async function (oCfg, aClasses) {
+			this._pageLoadToken = (this._pageLoadToken || 0) + 1;
 			var oUI = this._ui();
 			var that = this;
 			var sClassType = "002";
@@ -1160,6 +1169,7 @@ sap.ui.define([
 		},
 
 		_loadResultsLegacy: async function (oCfg, sClassId, oClass) {
+			this._pageLoadToken = (this._pageLoadToken || 0) + 1;
 			var oUI = this._ui();
 
 			// when the class changes, clear the (now class-specific) filters
@@ -1250,6 +1260,7 @@ sap.ui.define([
 				return;
 			}
 			var oUI = this._ui();
+			this._pageLoadToken = (this._pageLoadToken || 0) + 1;
 			oUI.setProperty("/tableBusy", true);
 
 			try {
@@ -1821,6 +1832,7 @@ sap.ui.define([
 				return;
 			}
 			var oUI = this._ui();
+			this._pageLoadToken = (this._pageLoadToken || 0) + 1;
 			ctx.sortField = sField;
 			ctx.sortDesc = !!bDesc;
 			oUI.setProperty("/sortField", sField);
@@ -1988,6 +2000,10 @@ sap.ui.define([
 			}
 			var oUI = this._ui();
 			var iPageSize = oUI.getProperty("/pageSize") || 25;
+			var iToken = this._pageLoadToken = (this._pageLoadToken || 0) + 1;
+			var bAppend = iPageIndex > 0;
+			var bLoaded = false;
+			oUI.setProperty("/loadMoreFailed", false);
 			oUI.setProperty("/tableBusy", true);
 			oUI.setProperty("/showEmptyState", false);
 
@@ -2005,7 +2021,14 @@ sap.ui.define([
 					iTotal = oPage.count;
 				}
 
+				if (iToken !== this._pageLoadToken || ctx !== this._pageCtx) {
+					return;
+				}
 				if (!aKeys.length) {
+					if (bAppend) {
+						this._updatePagination(this._currentPage, iPageSize, (oUI.getProperty("/rows") || []).length);
+						return;
+					}
 					oUI.setProperty("/rows", []);
 					oUI.setProperty("/treeRows", []);
 					oUI.setProperty("/showTable", false);
@@ -2027,20 +2050,47 @@ sap.ui.define([
 				var aRows = this._pivotData(aValues, ctx.aChars, ctx.mMeta, ctx.oCfg, oContext, mHeaders, aKeys);
 
 				// 5. odometer readings from the fleet odometer CDS view
-				ctx.odometer = await this._fetchOdometerReadings(aKeys);
-
+				var mOdometer = await this._fetchOdometerReadings(aKeys);
+				if (iToken !== this._pageLoadToken || ctx !== this._pageCtx) {
+					return;
+				}
+				ctx.headers = Object.assign({}, bAppend ? ctx.headers : {}, mHeaders);
+				ctx.odometer = Object.assign({}, bAppend ? ctx.odometer : {}, mOdometer);
+				var aTreeRows = this._buildTreeRows(aRows, ctx.aChars);
+				if (bAppend) {
+					aRows = (oUI.getProperty("/rows") || []).concat(aRows);
+					aTreeRows = (oUI.getProperty("/treeRows") || []).concat(aTreeRows);
+				}
+				oUI.setSizeLimit(Math.max(100, aTreeRows.length, ctx.aChars.length));
 				oUI.setProperty("/rows", aRows);
-				oUI.setProperty("/treeRows", this._buildTreeRows(aRows, ctx.aChars));
+				oUI.setProperty("/treeRows", aTreeRows);
 				oUI.setProperty("/showNoData", false);
 				oUI.setProperty("/showTable", true);
 				this._updatePagination(iPageIndex, iPageSize, iTotal);
+				if (!bAppend) {
+					this.byId("equipmentTreeTable").setFirstVisibleRow(0);
+				}
 
 				// re-apply any active page-local filters/search to the new page
 				this._applyResultFilters();
+				bLoaded = true;
 			} catch (oError) {
-				this._showError(this._bundle().getText("dataLoadError", [this._extractError(oError)]));
+				if (iToken === this._pageLoadToken && ctx === this._pageCtx) {
+					oUI.setProperty("/loadMoreFailed", bAppend);
+					this._showError(this._bundle().getText("dataLoadError", [this._extractError(oError)]));
+				}
 			} finally {
-				oUI.setProperty("/tableBusy", false);
+				if (iToken === this._pageLoadToken && ctx === this._pageCtx) {
+					oUI.setProperty("/tableBusy", false);
+					if (bLoaded) {
+						var that = this;
+						setTimeout(function () {
+							if (iToken === that._pageLoadToken && ctx === that._pageCtx) {
+								that.onTableScroll();
+							}
+						}, 0);
+					}
+				}
 			}
 		},
 
@@ -2115,17 +2165,13 @@ sap.ui.define([
 		/** Update pagination state + labels for the given page. */
 		_updatePagination: function (iPageIndex, iPageSize, iTotal) {
 			var oUI = this._ui();
-			var iPages = Math.max(1, Math.ceil(iTotal / iPageSize));
-			var iCurrent = iPageIndex + 1;
-			var iFrom = iTotal === 0 ? 0 : (iPageIndex * iPageSize) + 1;
 			var iTo = Math.min(iTotal, (iPageIndex + 1) * iPageSize);
 
 			this._currentPage = iPageIndex;
 			this._totalObjects = iTotal;
 			oUI.setProperty("/tableTitle", this._bundle().getText("tableTitle", [iTotal]));
-			oUI.setProperty("/pageInfo", this._bundle().getText("pageInfo", [iCurrent, iPages, iFrom, iTo]));
-			oUI.setProperty("/pagePrevEnabled", iPageIndex > 0);
-			oUI.setProperty("/pageNextEnabled", iCurrent < iPages);
+			oUI.setProperty("/pageInfo", this._bundle().getText("pageInfo", [iTo, iTotal]));
+			oUI.setProperty("/pageNextEnabled", iTo < iTotal);
 		},
 
 		/**
@@ -3112,6 +3158,7 @@ sap.ui.define([
 			var oUI = this._ui();
 			this._filterClassLoadToken = (this._filterClassLoadToken || 0) + 1;
 			this._subClassLoadToken = (this._subClassLoadToken || 0) + 1;
+			this._pageLoadToken = (this._pageLoadToken || 0) + 1;
 			oUI.setProperty("/rows", []);
 			oUI.setProperty("/treeRows", []);
 			oUI.setProperty("/columnConfig", []);
@@ -3120,8 +3167,9 @@ sap.ui.define([
 			oUI.setProperty("/showEmptyState", true);
 			oUI.setProperty("/tableTitle", "");
 			oUI.setProperty("/pageInfo", "");
-			oUI.setProperty("/pagePrevEnabled", false);
 			oUI.setProperty("/pageNextEnabled", false);
+			oUI.setProperty("/loadMoreFailed", false);
+			oUI.setProperty("/tableBusy", false);
 			this._pageCtx = null;
 			this._filterClassCtx = null;
 			this._currentPage = 0;
