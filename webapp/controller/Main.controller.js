@@ -1427,16 +1427,51 @@ sap.ui.define([
 		_loadCharacteristicValueOptions: async function (ctx, aCharcIds) {
 			var that = this;
 			var oModel = this._model(ctx.oCfg.modelName);
-			var aResponses = await Promise.all(aCharcIds.map(function (sCharcId) {
-				return that._read(oModel, ctx.oCfg.valueSet, {
-					"$filter": ctx.oCfg.filterField + " eq '" + that._esc(ctx.sClassId) +
-						"' and " + ctx.oCfg.charcIdField + " eq '" + that._esc(sCharcId) + "'",
-					"$select": ctx.oCfg.valueSelect,
-					"$top": MAX_VALUE_ROWS
-				}).then(function (aRows) { return { charcId: sCharcId, rows: aRows }; });
-			}));
-			var oSeen = {};
-			aResponses.forEach(function (oResponse) {
+			if (!aCharcIds.length) {
+				return [];
+			}
+
+			var oCharcModel = this._model("charc");
+			var aCharcChunks = this._chunk(aCharcIds, 40);
+			var aResults = await Promise.all([
+				Promise.all(aCharcChunks.map(function (aChunk) {
+					var sCharcFilter = aChunk.map(function (sCharcId) {
+						return "CharcInternalID eq '" + that._esc(sCharcId) + "'";
+					}).join(" or ");
+					return that._read(oCharcModel, "/A_ClfnCharacteristicForKeyDate", {
+						"$filter": sCharcFilter,
+						"$select": "CharcInternalID,to_CharacteristicValue/CharcValue,to_CharacteristicValue/CharcValuePositionNumber",
+						"$expand": "to_CharacteristicValue",
+						"$top": MAX_LIST_ROWS
+					});
+				})).then(function (aResponses) {
+					return [].concat.apply([], aResponses);
+				}),
+				Promise.all(aCharcIds.map(function (sCharcId) {
+					return that._read(oModel, ctx.oCfg.valueSet, {
+						"$filter": ctx.oCfg.filterField + " eq '" + that._esc(ctx.sClassId) +
+							"' and " + ctx.oCfg.charcIdField + " eq '" + that._esc(sCharcId) + "'",
+						"$select": ctx.oCfg.valueSelect,
+						"$top": MAX_VALUE_ROWS
+					}).then(function (aRows) { return { charcId: sCharcId, rows: aRows }; });
+				}))
+			]);
+			var aMaintainedRows = aResults[0];
+			var aAssignedResponses = aResults[1];
+			var oSeen = Object.create(null);
+			aMaintainedRows.forEach(function (oRow) {
+				var aValues = oRow.to_CharacteristicValue;
+				if (aValues && Array.isArray(aValues.results)) {
+					aValues = aValues.results;
+				}
+				(aValues || []).forEach(function (oValue) {
+					var sValue = that._formatCellValue(oValue, ctx.mMeta[oRow.CharcInternalID]);
+					if (sValue) {
+						oSeen[sValue] = true;
+					}
+				});
+			});
+			aAssignedResponses.forEach(function (oResponse) {
 				oResponse.rows.forEach(function (oRow) {
 					if (oRow.ClassInternalID !== ctx.sClassId) {
 						return;
