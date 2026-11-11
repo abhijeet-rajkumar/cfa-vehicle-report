@@ -2090,16 +2090,17 @@ sap.ui.define([
 			return mOut;
 		},
 
-		/** Reading field of a fleet odometer row (first property named like odometer/reading/mileage). */
+		/**
+		 * Total odometer reading in km for a fleet odometer row.
+		 * MeasurementCounterReading is the total counter reading stored in the
+		 * SI unit (metres); YY1_FLEET_ODOMETER only returns readings entered in
+		 * KM, so dividing by 1000 gives km. MeasurementReadingInEntryUoM is not
+		 * used because it holds only the difference when a reading is entered
+		 * as a difference.
+		 */
 		_pickOdometerValue: function (oRow) {
-			var aKeys = Object.keys(oRow).filter(function (k) {
-				return k !== "__metadata" && /odometer|reading|mileage|counter/i.test(k) && !/unit|date|time|uom/i.test(k);
-			});
-			if (!aKeys.length) {
-				return "";
-			}
-			var v = oRow[aKeys[0]];
-			return (v === null || v === undefined || v === "") ? "" : this._numStr(v);
+			var v = parseFloat(oRow.MeasurementCounterReading);
+			return isNaN(v) ? "" : this._numStr(Math.round(v / 1000));
 		},
 
 		/** Sortable recency stamp of a fleet odometer row (date/time fields concatenated). */
