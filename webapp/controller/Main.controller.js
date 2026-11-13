@@ -2096,8 +2096,9 @@ sap.ui.define([
 
 		/**
 		 * Load odometer readings for the given equipment keys from
-		 * YY1_FLEET_ODOMETER (latest reading per equipment). Failures are
-		 * non-fatal: the column then falls back to the characteristic value.
+		 * YY1_FLEET_ODOMETER (latest non-NEW reading plus all NEW readings per
+		 * equipment). Failures are non-fatal: the column falls back to the
+		 * characteristic value.
 		 * @param {string[]} aKeys equipment numbers
 		 * @returns {Promise<object>} map equipment -> formatted reading
 		 */
@@ -2108,35 +2109,56 @@ sap.ui.define([
 				return mOut;
 			}
 			var mLatest = {};
+			var mNewTotals = {};
 			try {
 				var aChunks = this._chunk(aKeys, 20);
 				for (var i = 0; i < aChunks.length; i++) {
 					var sFilter = aChunks[i].map(function (sKey) {
 						return "Equipment eq '" + this._esc(sKey) + "'";
 					}, this).join(" or ");
-					var aRows = await this._read(oModel, "/YY1_FLEET_ODOMETER", {
-						"$filter": sFilter,
-						"$top": MAX_LIST_ROWS
-					});
-					aRows.forEach(function (oRow) {
-						var sEquipment = oRow.Equipment;
-						var sReading = this._pickOdometerValue(oRow);
-						if (!sEquipment || sReading === "") {
-							return;
+					var iSkip = 0;
+					var oPage;
+					do {
+						oPage = await this._readWithCount(oModel, "/YY1_FLEET_ODOMETER", {
+							"$filter": sFilter,
+							"$top": MAX_LIST_ROWS,
+							"$skip": iSkip,
+							"$inlinecount": "allpages",
+							"$orderby": "Equipment,MeasurementDocument"
+						});
+						if (!oPage.hasCount) {
+							throw new Error("Odometer response did not include a valid total count");
 						}
-						var sStamp = this._pickOdometerStamp(oRow);
-						var oPrev = mLatest[sEquipment];
-						if (!oPrev || sStamp >= oPrev.stamp) {
-							mLatest[sEquipment] = { stamp: sStamp, value: sReading };
+						if (!oPage.results.length && iSkip < oPage.count) {
+							throw new Error("Incomplete odometer readings response");
 						}
-					}, this);
+						oPage.results.forEach(function (oRow) {
+							var sEquipment = oRow.Equipment;
+							var fReading = this._pickOdometerValue(oRow);
+							if (!sEquipment || fReading === "") {
+								return;
+							}
+							if (/new/i.test(oRow.MeasuringPointPositionNumber || "")) {
+								mNewTotals[sEquipment] = (mNewTotals[sEquipment] || 0) + fReading;
+								return;
+							}
+							var sStamp = this._pickOdometerStamp(oRow);
+							var oPrev = mLatest[sEquipment];
+							if (!oPrev || sStamp >= oPrev.stamp) {
+								mLatest[sEquipment] = { stamp: sStamp, value: fReading };
+							}
+						}, this);
+						iSkip += oPage.results.length;
+					} while (iSkip < oPage.count);
 				}
 			} catch (oError) {
+				this._showError(this._bundle().getText("odometerLoadError", [this._extractError(oError)]));
 				return {};
 			}
-			Object.keys(mLatest).forEach(function (sKey) {
-				mOut[sKey] = mLatest[sKey].value;
-			});
+			Object.keys(mLatest).concat(Object.keys(mNewTotals)).forEach(function (sKey) {
+				var fLatest = mLatest[sKey] ? mLatest[sKey].value : 0;
+				mOut[sKey] = this._numStr(Math.round(fLatest + (mNewTotals[sKey] || 0)));
+			}, this);
 			return mOut;
 		},
 
@@ -2150,7 +2172,7 @@ sap.ui.define([
 		 */
 		_pickOdometerValue: function (oRow) {
 			var v = parseFloat(oRow.MeasurementCounterReading);
-			return isNaN(v) ? "" : this._numStr(Math.round(v / 1000));
+			return isNaN(v) ? "" : v / 1000;
 		},
 
 		/** Sortable recency stamp of a fleet odometer row (date/time fields concatenated). */
@@ -2978,7 +3000,8 @@ sap.ui.define([
 						that._onAuthOk();
 						var aResults = (oData && Array.isArray(oData.results)) ? oData.results : (oData ? [oData] : []);
 						var iCount = (oData && oData.__count !== undefined) ? parseInt(oData.__count, 10) : aResults.length;
-						resolve({ results: aResults, count: isNaN(iCount) ? aResults.length : iCount });
+						var bHasCount = !!oData && /^\d+$/.test(String(oData.__count));
+						resolve({ results: aResults, count: isNaN(iCount) ? aResults.length : iCount, hasCount: bHasCount });
 					},
 					error: function (oError) {
 						if (that._isAuthError(oError)) { that._forceReauth(); }
