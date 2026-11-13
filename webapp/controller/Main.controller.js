@@ -205,7 +205,7 @@ sap.ui.define([
 					// header read separately ($expand on the value view dumps on the DB).
 					// Equipment is time-dependent (key includes ValidityEndDate).
 					headerSet: "/Equipment",
-					headerSelect: "Equipment,EquipmentName,MaintenancePlant,ValidityEndDate,ManufacturerSerialNumber,OperationStartDate,MaintenancePlannerGroup,FunctionalLocationLabelName,FunctionalLocationName,SuperordinateEquipment,TechnicalObjectSortCode",
+					headerSelect: "Equipment,EquipmentName,MaintenancePlant,ValidityEndDate,ManufacturerSerialNumber,OperationStartDate,ConstructionMonth,ConstructionYear,MaintenancePlannerGroup,FunctionalLocationLabelName,FunctionalLocationName,SuperordinateEquipment,TechnicalObjectSortCode",
 					headerHasValidity: true,
 					// raw header field used by the Start-Up Date range filter
 					dateFilterField: "OperationStartDate",
@@ -214,7 +214,7 @@ sap.ui.define([
 					// single-call header fetch: expand the class->object navigation so
 					// one request returns every object's header data for the class.
 					headerExpandNav: "to_Equipment",
-					headerExpandSelect: "Equipment,to_Equipment/Equipment,to_Equipment/EquipmentName,to_Equipment/MaintenancePlant,to_Equipment/ValidityEndDate,to_Equipment/ManufacturerSerialNumber,to_Equipment/OperationStartDate,to_Equipment/MaintenancePlannerGroup,to_Equipment/FunctionalLocationLabelName,to_Equipment/FunctionalLocationName,to_Equipment/SuperordinateEquipment,to_Equipment/TechnicalObjectSortCode",
+					headerExpandSelect: "Equipment,to_Equipment/Equipment,to_Equipment/EquipmentName,to_Equipment/MaintenancePlant,to_Equipment/ValidityEndDate,to_Equipment/ManufacturerSerialNumber,to_Equipment/OperationStartDate,to_Equipment/ConstructionMonth,to_Equipment/ConstructionYear,to_Equipment/MaintenancePlannerGroup,to_Equipment/FunctionalLocationLabelName,to_Equipment/FunctionalLocationName,to_Equipment/SuperordinateEquipment,to_Equipment/TechnicalObjectSortCode",
 					fixedColumns: [
 						{ key: "objNumber", label: oBundle.getText("colEquipment"), width: "11rem", get: function (sKey) { return sKey; } },
 						{ key: "objDesc", label: oBundle.getText("colDescription"), width: "18rem", get: function (sKey, oHeader) { return oHeader.EquipmentName; } },
@@ -1296,7 +1296,7 @@ sap.ui.define([
 
 				if (oAgeRange.active) {
 					aKeys = aKeys.filter(function (sKey) {
-						var iAgeMonths = this._vehicleAgeMonths((ctx.headers[sKey] || {}).OperationStartDate);
+						var iAgeMonths = this._vehicleAgeMonths(ctx.headers[sKey] || {});
 						if (iAgeMonths === null) {
 							return false;
 						}
@@ -1780,7 +1780,7 @@ sap.ui.define([
 				});
 				o.TechnicalObject = o.objNumber || "";
 				o.TechnicalObjectDescription = o.objDesc || "";
-				o.VehicleAge = this._vehicleAge(oHeader.OperationStartDate);
+				o.VehicleAge = this._vehicleAge(oHeader);
 				o.Class = o.objClass || "";
 				o.SubClassName = (aChars || []).map(function (oChar) {
 					return oChar.Characteristic || "";
@@ -2608,7 +2608,7 @@ sap.ui.define([
 				var oOut = {
 					TechnicalObject: oRow.objNumber || "",
 					TechnicalObjectDescription: oRow.objDesc || "",
-					VehicleAge: this._vehicleAge(oHeader.OperationStartDate),
+					VehicleAge: this._vehicleAge(oHeader),
 					Class: oRow.objClass || "",
 					CabinConfiguration: oRow.cabinConfig,
 					EquipmentOwnedBy: oRow.ownedBy,
@@ -2616,6 +2616,7 @@ sap.ui.define([
 					StartUpDate: fmtSAPDateISO(oRow.OperationStartDate),
 					ManufacturerSerialNumber: oRow.ManufacturerSerialNumber || "",
 					TechnicalID: oHeader.TechnicalObjectSortCode || "",
+					ConstructionMonthYear: this._constructionMonthYear(oHeader),
 					children: []
 				};
 				if (bShowOnlyParent) {
@@ -2667,8 +2668,8 @@ sap.ui.define([
 			}, this);
 		},
 
-		_vehicleAge: function (vStartDate) {
-			var iMonths = this._vehicleAgeMonths(vStartDate);
+		_vehicleAge: function (oHeader) {
+			var iMonths = this._vehicleAgeMonths(oHeader);
 			if (iMonths === null) {
 				return "";
 			}
@@ -2679,8 +2680,18 @@ sap.ui.define([
 				" " + iMonths + " " + oBundle.getText(iMonths === 1 ? "vehicleAgeMonth" : "vehicleAgeMonths");
 		},
 
-		_vehicleAgeMonths: function (vStartDate) {
-			var sStartDate = fmtSAPDateISO(vStartDate);
+		_vehicleAgeMonths: function (oHeader) {
+			var sConstructionMonthYear = this._constructionMonthYear(oHeader);
+			var aConstructionParts = /^(\d{2})\/(\d{4})$/.exec(sConstructionMonthYear);
+			if (aConstructionParts) {
+				var dToday = new Date();
+				var iConstructionMonths = parseInt(aConstructionParts[2], 10) * 12 +
+					parseInt(aConstructionParts[1], 10) - 1;
+				var iCurrentMonths = dToday.getUTCFullYear() * 12 + dToday.getUTCMonth();
+				return Math.max(0, iCurrentMonths - iConstructionMonths);
+			}
+
+			var sStartDate = fmtSAPDateISO(oHeader.OperationStartDate);
 			var aDateParts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(sStartDate);
 			if (!aDateParts) {
 				return null;
@@ -2706,6 +2717,16 @@ sap.ui.define([
 
 		_getVehicleAgeRange: function () {
 			return this._getRange("vehicleAgeFrom", "vehicleAgeTo", "vehicleAgeRangeInvalid", "vehicleAgeRangeOrderInvalid");
+		},
+
+		_constructionMonthYear: function (oHeader) {
+			var sMonth = String(oHeader.ConstructionMonth || "");
+			var sYear = String(oHeader.ConstructionYear || "");
+			var iMonth = parseInt(sMonth, 10);
+			if (!/^\d{1,2}$/.test(sMonth) || !/^\d{4}$/.test(sYear) || iMonth < 1 || iMonth > 12) {
+				return "";
+			}
+			return String(iMonth).padStart(2, "0") + "/" + sYear;
 		},
 
 		_getOdometerRange: function () {

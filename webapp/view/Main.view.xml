@@ -347,6 +347,12 @@
 								<Text text="{ui>ManufacturerSerialNumber}" />
 							</table:template>
 						</table:Column>
+						<table:Column width="16rem">
+							<Label text="{i18n>colConstructionMonthYear}" />
+							<table:template>
+								<Text text="{ui>ConstructionMonthYear}" />
+							</table:template>
+						</table:Column>
 						<table:Column width="22rem">
 							<Label text="{i18n>colTechnicalIdGeneralData}" />
 							<table:template>
