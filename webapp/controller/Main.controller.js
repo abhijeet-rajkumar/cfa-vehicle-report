@@ -2096,9 +2096,8 @@ sap.ui.define([
 
 		/**
 		 * Load odometer readings for the given equipment keys from
-		 * YY1_FLEET_ODOMETER (latest non-NEW reading plus all NEW readings per
-		 * equipment). Failures are non-fatal: the column falls back to the
-		 * characteristic value.
+		 * YY1_FLEET_ODOMETER. For each equipment, sum the latest reading from
+		 * each distinct measuring point. Failures fall back to the characteristic.
 		 * @param {string[]} aKeys equipment numbers
 		 * @returns {Promise<object>} map equipment -> formatted reading
 		 */
@@ -2108,8 +2107,7 @@ sap.ui.define([
 			if (!oModel || !aKeys.length) {
 				return mOut;
 			}
-			var mLatest = {};
-			var mNewTotals = {};
+			var mEquipmentPoints = Object.create(null);
 			try {
 				var aChunks = this._chunk(aKeys, 20);
 				for (var i = 0; i < aChunks.length; i++) {
@@ -2138,51 +2136,66 @@ sap.ui.define([
 							if (!sEquipment || fReading === "") {
 								return;
 							}
-							if (/new/i.test(oRow.MeasuringPointPositionNumber || "")) {
-								mNewTotals[sEquipment] = (mNewTotals[sEquipment] || 0) + fReading;
-								return;
+							var sPoint = oRow.MeasuringPoint;
+							if (sPoint === undefined || sPoint === null || sPoint === "") {
+								throw new Error("Missing measuring point for equipment " + sEquipment);
 							}
-							var sStamp = this._pickOdometerStamp(oRow);
-							var oPrev = mLatest[sEquipment];
-							if (!oPrev || sStamp >= oPrev.stamp) {
-								mLatest[sEquipment] = { stamp: sStamp, value: fReading };
+							var mPoints = mEquipmentPoints[sEquipment];
+							if (!mPoints) {
+								mPoints = mEquipmentPoints[sEquipment] = Object.create(null);
+							}
+							var iStamp = this._pickOdometerStamp(oRow);
+							var oLatest = mPoints[sPoint];
+							if (!oLatest || iStamp >= oLatest.stamp) {
+								mPoints[sPoint] = { stamp: iStamp, value: fReading };
 							}
 						}, this);
 						iSkip += oPage.results.length;
 					} while (iSkip < oPage.count);
 				}
+				Object.keys(mEquipmentPoints).forEach(function (sKey) {
+					var fTotal = Object.keys(mEquipmentPoints[sKey]).reduce(function (fSum, sPoint) {
+						return fSum + mEquipmentPoints[sKey][sPoint].value;
+					}, 0);
+					mOut[sKey] = this._numStr(fTotal / 1000);
+				}, this);
 			} catch (oError) {
 				this._showError(this._bundle().getText("odometerLoadError", [this._extractError(oError)]));
 				return {};
 			}
-			Object.keys(mLatest).concat(Object.keys(mNewTotals)).forEach(function (sKey) {
-				var fLatest = mLatest[sKey] ? mLatest[sKey].value : 0;
-				mOut[sKey] = this._numStr(Math.round(fLatest + (mNewTotals[sKey] || 0)));
-			}, this);
 			return mOut;
 		},
 
 		/**
-		 * Total odometer reading in km for a fleet odometer row.
+		 * Total odometer reading in metres for a fleet odometer row.
 		 * MeasurementCounterReading is the total counter reading stored in the
-		 * SI unit (metres); YY1_FLEET_ODOMETER only returns readings entered in
-		 * KM, so dividing by 1000 gives km. MeasurementReadingInEntryUoM is not
-		 * used because it holds only the difference when a reading is entered
-		 * as a difference.
+		 * SI unit (metres); the combined total is converted to km for display.
+		 * MeasurementReadingInEntryUoM is not used because it holds only the
+		 * difference when a reading is entered as a difference.
 		 */
 		_pickOdometerValue: function (oRow) {
 			var v = parseFloat(oRow.MeasurementCounterReading);
-			return isNaN(v) ? "" : v / 1000;
+			return isNaN(v) ? "" : v;
 		},
 
-		/** Sortable recency stamp of a fleet odometer row (date/time fields concatenated). */
+		/** Sortable recency stamp from the measurement date and OData time-of-day. */
 		_pickOdometerStamp: function (oRow) {
-			return Object.keys(oRow).filter(function (k) {
-				return /date|time/i.test(k) && k !== "__metadata";
-			}).sort().map(function (k) {
-				var v = oRow[k];
-				return v instanceof Date ? v.toISOString() : String(v == null ? "" : v);
-			}).join("|");
+			var vDate = oRow.MsmtRdngDate;
+			var aSAPDate = /\/Date\((-?\d+)/.exec(String(vDate || ""));
+			var iDate = vDate instanceof Date ? vDate.getTime() :
+				(aSAPDate ? parseInt(aSAPDate[1], 10) : Date.parse(vDate));
+			var vTime = oRow.MsmtRdngTime;
+			var iTime = 0;
+			if (vTime && typeof vTime === "object" && typeof vTime.ms === "number") {
+				iTime = vTime.ms;
+			} else if (typeof vTime === "string") {
+				var aTime = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$/i.exec(vTime);
+				if (aTime) {
+					iTime = ((Number(aTime[1] || 0) * 60 + Number(aTime[2] || 0)) * 60 +
+						Number(aTime[3] || 0)) * 1000;
+				}
+			}
+			return (isNaN(iDate) ? 0 : iDate) + iTime;
 		},
 
 		/** Update pagination state + labels for the given page. */
